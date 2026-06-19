@@ -58,12 +58,37 @@ function ensureInit_() {
     props.setProperty(PROP_SPREADSHEET_ID, ss.getId());
   }
 
-  // 各シートを保証
+  // 各シートを保証（ヘッダーが旧版・不一致なら作り直す）
   Object.keys(SHEET_DEFS).forEach(function (name) {
+    var def = SHEET_DEFS[name];
     var sheet = ss.getSheetByName(name);
     if (!sheet) {
       sheet = ss.insertSheet(name);
-      sheet.getRange(1, 1, 1, SHEET_DEFS[name].length).setValues([SHEET_DEFS[name]]);
+      sheet.getRange(1, 1, 1, def.length).setValues([def]);
+      return;
+    }
+    // 既存シートのヘッダー行を検証。旧スキーマ（例: 旧 Boards の classCode 列・
+    // unit 列なし）のまま残っていると appendRow の列ズレで不具合になるため、
+    // 1行目（データ未投入時）またはヘッダー不一致を検知したら定義どおりに補正する。
+    var lastRow = sheet.getLastRow();
+    var width = Math.max(def.length, sheet.getLastColumn());
+    var header = sheet.getRange(1, 1, 1, width).getValues()[0];
+    var matches = true;
+    for (var k = 0; k < def.length; k++) {
+      if (String(header[k] || '') !== def[k]) { matches = false; break; }
+    }
+    if (!matches) {
+      if (lastRow <= 1) {
+        // データがまだ無いので安全にヘッダーを置き換える
+        if (lastRow >= 1) sheet.getRange(1, 1, 1, width).clearContent();
+        sheet.getRange(1, 1, 1, def.length).setValues([def]);
+      } else {
+        // データがある旧スキーマのシートは破壊せず退避し、新しい空シートを作る
+        var backup = name + '_旧_' + Utilities.formatDate(new Date(), 'Asia/Tokyo', 'yyyyMMdd_HHmmss');
+        sheet.setName(backup);
+        var fresh = ss.insertSheet(name);
+        fresh.getRange(1, 1, 1, def.length).setValues([def]);
+      }
     }
   });
   // 自動生成された空の "シート1"/"Sheet1" を削除
@@ -84,7 +109,12 @@ function getSpreadsheet_() {
   return ensureInit_();
 }
 function getSheet_(name) {
-  return getSpreadsheet_().getSheetByName(name);
+  var sheet = getSpreadsheet_().getSheetByName(name);
+  if (!sheet) {
+    // 通常 ensureInit_ で作成済みだが、手動削除など想定外時に分かりやすく失敗させる
+    throw new Error('シート「' + name + '」が見つかりません。データの初期化に失敗している可能性があります。');
+  }
+  return sheet;
 }
 function getPhotoFolder_() {
   ensureInit_();
@@ -286,7 +316,8 @@ function rowToBoard_(r) {
 }
 function fmtDate_(d) {
   if (d instanceof Date) return Utilities.formatDate(d, 'Asia/Tokyo', 'yyyy-MM-dd');
-  return d;
+  if (d == null) return '';
+  return String(d);
 }
 
 function getBoard(boardId) {
@@ -299,11 +330,16 @@ function createBoard(subject, unit, date, title) {
   unit = String(unit || '').trim();
   if (!subject) throw new Error('教科を選択してください。');
   if (!unit) throw new Error('単元名を入力してください。');
+  date = String(date || '').trim();
   if (!date) date = Utilities.formatDate(new Date(), 'Asia/Tokyo', 'yyyy-MM-dd');
+  title = String(title || '').trim();
   if (!title) title = unit;
   var id = genId_('b');
-  getSheet_(SHEET_BOARDS).appendRow([id, subject, unit, date, title, new Date()]);
-  return getBoard(id);
+  // 列順は SHEET_DEFS[SHEET_BOARDS] と一致させること（boardId, subject, unit, date, title, createdAt）
+  getSheet_(SHEET_BOARDS).appendRow([id, subject, unit, "'" + date, title, new Date()]);
+  var created = getBoard(id);
+  if (!created) throw new Error('ボードの作成に失敗しました。もう一度お試しください。');
+  return created;
 }
 
 function deleteBoard(boardId) {

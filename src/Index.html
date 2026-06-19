@@ -11,7 +11,18 @@
     }
     *{box-sizing:border-box}
     html,body{margin:0;padding:0;color:var(--text);background:var(--bg);
-      font-family:-apple-system,BlinkMacSystemFont,"Hiragino Kaku Gothic ProN","Yu Gothic",Meiryo,sans-serif}
+      font-size:16px;line-height:1.6;
+      font-family:"UD デジタル教科書体 NK-R","UD Digi Kyokasho NK-R","BIZ UDPGothic","BIZ UDPゴシック",
+        "Hiragino Maru Gothic ProN","ヒラギノ丸ゴ ProN","Hiragino Maru Gothic Pro",
+        "Yu Gothic UI","Yu Gothic Medium","游ゴシック",Meiryo,"メイリオ",sans-serif}
+
+    /* エラーバナー（トーストが消えても内容を読めるよう画面上部に残す） */
+    .err-banner{position:fixed;top:0;left:0;right:0;z-index:400;background:#ffe5e5;color:#b00020;
+      border-bottom:2px solid #b00020;padding:12px 18px;font-size:15px;font-weight:600;
+      display:flex;align-items:center;justify-content:space-between;gap:12px}
+    .err-banner .err-text{word-break:break-word}
+    .err-banner .err-close{background:transparent;border:none;color:#b00020;font-size:22px;line-height:1;
+      cursor:pointer;padding:0 4px}
 
     #appHeader{display:flex;align-items:center;justify-content:space-between;padding:10px 16px;
       background:var(--panel);border-bottom:1px solid var(--border);position:sticky;top:0;z-index:50}
@@ -22,7 +33,7 @@
     .whoami{font-size:13px;color:var(--muted)}
     main{padding:20px 16px 80px;max-width:1200px;margin:0 auto}
 
-    button{font-family:inherit;cursor:pointer;border-radius:10px;font-size:14px}
+    button{font-family:inherit;cursor:pointer;border-radius:10px;font-size:16px}
     .primary-btn{background:var(--accent);color:#fff;border:none;padding:10px 18px;font-weight:600}
     .primary-btn:hover{filter:brightness(.95)}
     .primary-btn:disabled{opacity:.5;cursor:default}
@@ -51,8 +62,8 @@
       transition:transform .1s,box-shadow .1s;position:relative}
     .board-card:hover{transform:translateY(-2px);box-shadow:0 8px 20px rgba(0,0,0,.08)}
     .subject-chip{display:inline-block;background:var(--accent2);color:#fff;font-size:12px;padding:3px 10px;border-radius:999px;margin-bottom:10px}
-    .board-card h3{margin:0 0 6px;font-size:16px}
-    .board-card .meta{color:var(--muted);font-size:13px}
+    .board-card h3{margin:0 0 6px;font-size:18px}
+    .board-card .meta{color:var(--muted);font-size:14px}
 
     /* ボード（Padlet風） */
     .board-bar{display:flex;align-items:center;justify-content:space-between;background:var(--panel);
@@ -63,20 +74,20 @@
     .card{width:240px;border-radius:14px;padding:14px;box-shadow:0 3px 10px rgba(0,0,0,.08);position:relative;
       background:#fff7c0;cursor:grab}
     .card.dragging{opacity:.4}
-    .card .author{font-weight:700;font-size:14px;margin-bottom:6px}
-    .card .body{font-size:14px;white-space:pre-wrap;word-break:break-word;line-height:1.5}
+    .card .author{font-weight:700;font-size:16px;margin-bottom:6px}
+    .card .body{font-size:16px;white-space:pre-wrap;word-break:break-word;line-height:1.7}
     .card img.photo{width:100%;border-radius:10px;margin-top:10px;display:block}
     .card .time{color:rgba(0,0,0,.45);font-size:11px;margin-top:8px}
     .card .del{position:absolute;top:8px;right:8px;background:rgba(255,255,255,.7);border:none;border-radius:8px;opacity:0;padding:2px 7px}
     .card:hover .del{opacity:1}
-    .card-actions{display:flex;gap:14px;margin-top:10px;font-size:13px;align-items:center}
+    .card-actions{display:flex;gap:14px;margin-top:10px;font-size:15px;align-items:center}
     .card-actions .act{cursor:pointer;user-select:none;background:rgba(255,255,255,.5);border:none;border-radius:8px;padding:3px 8px}
     .card-actions .act.liked{color:var(--accent);font-weight:700}
     .comments{margin-top:10px;border-top:1px solid rgba(0,0,0,.08);padding-top:8px}
-    .comment{font-size:13px;margin-bottom:5px}
+    .comment{font-size:15px;margin-bottom:5px}
     .comment b{font-weight:700}
     .comment-form{display:flex;gap:6px;margin-top:6px}
-    .comment-form input{flex:1;padding:6px 8px;border:1px solid rgba(0,0,0,.15);border-radius:8px;font-size:13px}
+    .comment-form input{flex:1;padding:6px 8px;border:1px solid rgba(0,0,0,.15);border-radius:8px;font-size:15px;font-family:inherit}
     .comment-form button{border:none;background:var(--accent2);color:#fff;border-radius:8px;padding:6px 10px}
 
     .fab{position:fixed;right:24px;bottom:24px;width:60px;height:60px;border-radius:50%;background:var(--accent);
@@ -88,7 +99,7 @@
     .modal-card h3{margin:0 0 16px}
     .field{display:block;margin-bottom:14px}
     .field>span{display:block;font-size:13px;color:var(--muted);margin-bottom:6px}
-    .field input,.field textarea,.field select{width:100%;padding:10px;border:1px solid var(--border);border-radius:10px;font-family:inherit;font-size:14px}
+    .field input,.field textarea,.field select{width:100%;padding:10px;border:1px solid var(--border);border-radius:10px;font-family:inherit;font-size:16px}
     .preview{width:100%;border-radius:10px;margin-bottom:14px}
     .color-row{display:flex;gap:8px;margin-bottom:18px;flex-wrap:wrap}
     .swatch{width:30px;height:30px;border-radius:50%;cursor:pointer;border:2px solid transparent}
@@ -100,7 +111,7 @@
     .tab{padding:8px 16px;border-radius:999px;border:1px solid var(--border);background:var(--panel)}
     .tab.active{background:var(--text);color:#fff;border-color:var(--text)}
     table{width:100%;border-collapse:collapse;background:var(--panel);border-radius:12px;overflow:hidden}
-    th,td{text-align:left;padding:10px 14px;border-bottom:1px solid var(--border);font-size:14px}
+    th,td{text-align:left;padding:10px 14px;border-bottom:1px solid var(--border);font-size:15px}
     th{background:#faf6f0;color:var(--muted);font-weight:600}
     .row-form{display:flex;gap:8px;flex-wrap:wrap;align-items:flex-end;margin:16px 0}
     .row-form .field{margin-bottom:0;flex:1;min-width:140px}
@@ -158,12 +169,32 @@ var App = (function(){
   var $ = function(id){ return document.getElementById(id); };
   var view = function(){ return $('view'); };
   function esc(s){return String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');}
-  function spinner(){ view().innerHTML='<div class="spinner">読み込み中…</div>'; }
+  function spinner(){ var b=$('errBanner'); if(b)b.classList.add('hidden'); view().innerHTML='<div class="spinner">読み込み中…</div>'; }
   function setCrumb(t){ $('crumb').textContent = t ? '/ '+t : ''; }
   function toast(m){var t=$('toast');t.textContent=m;t.classList.remove('hidden');clearTimeout(t._t);t._t=setTimeout(function(){t.classList.add('hidden');},2600);}
   function fmt(d){var x=new Date(d);if(isNaN(x))return '';return (x.getMonth()+1)+'/'+x.getDate()+' '+('0'+x.getHours()).slice(-2)+':'+('0'+x.getMinutes()).slice(-2);}
   function run(fn){var a=[].slice.call(arguments,1);return new Promise(function(res,rej){var r=google.script.run.withSuccessHandler(res).withFailureHandler(rej);r[fn].apply(r,a);});}
-  function err(e){console.error(e);toast('エラー: '+((e&&e.message)?e.message:e));}
+  function errMsg(e){return (e&&e.message)?e.message:(e==null?'不明なエラー':String(e));}
+  function err(e){
+    console.error(e);
+    var m=errMsg(e);
+    toast('エラー: '+m);
+    // トーストは数秒で消えるため、画面上部に消えない赤字バナーも表示して内容を読めるようにする
+    showErrorBanner(m);
+  }
+  function showErrorBanner(m){
+    var bar=$('errBanner');
+    if(!bar){
+      bar=document.createElement('div');
+      bar.id='errBanner';
+      bar.className='err-banner';
+      document.body.appendChild(bar);
+    }
+    bar.innerHTML='<span class="err-text"></span><button class="err-close" title="閉じる">×</button>';
+    bar.querySelector('.err-text').textContent='⚠ エラー: '+m;
+    bar.querySelector('.err-close').onclick=function(){bar.classList.add('hidden');};
+    bar.classList.remove('hidden');
+  }
 
   // -------- モーダル --------
   function modal(html){ $('modalRoot').innerHTML = '<div class="modal"><div class="modal-card">'+html+'</div></div>'; }
