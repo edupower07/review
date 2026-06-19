@@ -1,0 +1,8 @@
+# clasp の実プロジェクト設定（scriptId を含むためコミットしない）
+.clasp.json
+.clasprc.json
+
+# OS / エディタ
+.DS_Store
+node_modules/
+*.log

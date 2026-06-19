@@ -1,0 +1,522 @@
+<script>
+var App = (function () {
+  var state = {
+    classInfo: null,      // { classCode, className }
+    students: [],
+    board: null,          // 現在開いているボード
+    selectedColor: '#fff7c0',
+    pendingPhoto: null    // { data, mimeType, filename }
+  };
+
+  var COLORS = ['#fff7c0', '#ffd1dc', '#c8f0d0', '#cfe3ff', '#e8d6ff', '#ffe2bf'];
+
+  var view = function () { return document.getElementById('view'); };
+
+  // ---------- 共通 ----------
+  function esc(s) {
+    return String(s == null ? '' : s)
+      .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;');
+  }
+  function toast(msg) {
+    var t = document.getElementById('toast');
+    t.textContent = msg; t.classList.remove('hidden');
+    clearTimeout(t._timer);
+    t._timer = setTimeout(function () { t.classList.add('hidden'); }, 2500);
+  }
+  function spinner() { view().innerHTML = '<div class="spinner">読み込み中…</div>'; }
+  function setCrumb(text) { document.getElementById('crumb').textContent = text ? '/ ' + text : ''; }
+  function fmtTime(d) {
+    var dt = new Date(d);
+    if (isNaN(dt)) return '';
+    return (dt.getMonth() + 1) + '/' + dt.getDate() + ' ' +
+      ('0' + dt.getHours()).slice(-2) + ':' + ('0' + dt.getMinutes()).slice(-2);
+  }
+  function run(fn) {
+    var args = Array.prototype.slice.call(arguments, 1);
+    return new Promise(function (resolve, reject) {
+      var runner = google.script.run.withSuccessHandler(resolve).withFailureHandler(reject);
+      runner[fn].apply(runner, args);
+    });
+  }
+
+  // ---------- 入口（クラスコード） ----------
+  function renderEntry() {
+    state.board = null; state.classInfo = null;
+    setCrumb('');
+    document.getElementById('teacherBtn').classList.remove('hidden');
+    view().innerHTML =
+      '<div class="entry">' +
+        '<h1>📌 振り返りボード</h1>' +
+        '<p>先生から教わったクラスコードを入力してね</p>' +
+        '<input id="codeInput" maxlength="5" placeholder="ABCDE" autocomplete="off">' +
+        '<button class="primary-btn" onclick="App.enterClass()">入る</button>' +
+      '</div>';
+    var input = document.getElementById('codeInput');
+    input.focus();
+    input.addEventListener('keydown', function (e) { if (e.key === 'Enter') enterClass(); });
+  }
+
+  function enterClass() {
+    var code = document.getElementById('codeInput').value.trim().toUpperCase();
+    if (!code) return;
+    spinner();
+    run('getClassInfo', code).then(function (info) {
+      if (!info) { renderEntry(); toast('クラスコードが見つかりません'); return; }
+      state.classInfo = info;
+      openBoardList();
+    }).catch(showError);
+  }
+
+  // ---------- ボード一覧 ----------
+  function openBoardList() {
+    state.board = null;
+    setCrumb(state.classInfo.className);
+    spinner();
+    Promise.all([run('getBoards', state.classInfo.classCode), run('getStudents', state.classInfo.classCode)])
+      .then(function (res) {
+        state.students = res[1];
+        renderBoardList(res[0]);
+      }).catch(showError);
+  }
+
+  function renderBoardList(boards) {
+    var html = '<div class="section-title"><h2>' + esc(state.classInfo.className) + ' のボード</h2></div>';
+    if (!boards.length) {
+      html += '<div class="empty">まだボードがありません。<br>先生がボードを作るとここに表示されます。</div>';
+    } else {
+      html += '<div class="grid">';
+      boards.forEach(function (b) {
+        html += '<div class="board-card" onclick="App.openBoard(\'' + b.boardId + '\')">' +
+          '<span class="subject-chip">' + esc(b.subject) + '</span>' +
+          '<h3>' + esc(b.title) + '</h3>' +
+          '<div class="meta">' + esc(b.date) + '</div>' +
+          '</div>';
+      });
+      html += '</div>';
+    }
+    view().innerHTML = html;
+  }
+
+  // ---------- ボード（Padlet 風） ----------
+  function openBoard(boardId) {
+    spinner();
+    Promise.all([run('getBoard', boardId), run('getReflections', boardId)])
+      .then(function (res) {
+        state.board = res[0];
+        setCrumb(state.classInfo.className + ' › ' + state.board.title);
+        renderBoard(res[1]);
+      }).catch(showError);
+  }
+
+  function renderBoard(reflections) {
+    var b = state.board;
+    var html =
+      '<div class="board-bar">' +
+        '<div><div class="title">' + esc(b.title) + '</div>' +
+        '<div class="sub">' + esc(b.subject) + ' ・ ' + esc(b.date) + '</div></div>' +
+        '<button class="ghost-btn" onclick="App.openBoardList()">← ボード一覧</button>' +
+      '</div>';
+
+    if (!reflections.length) {
+      html += '<div class="empty">まだ投稿がありません。右下の＋から最初の振り返りを書こう！</div>';
+    } else {
+      html += '<div class="cards" id="cards"></div>';
+    }
+    view().innerHTML = html;
+
+    if (reflections.length) {
+      var c = document.getElementById('cards');
+      reflections.forEach(function (r) { c.appendChild(cardEl(r)); });
+    }
+
+    var fab = document.createElement('button');
+    fab.className = 'fab'; fab.textContent = '＋';
+    fab.onclick = openPost;
+    view().appendChild(fab);
+  }
+
+  function cardEl(r) {
+    var div = document.createElement('div');
+    div.className = 'card';
+    div.style.background = r.color || '#fff7c0';
+    var img = r.photoUrl ? '<img src="' + esc(r.photoUrl) + '" loading="lazy" referrerpolicy="no-referrer">' : '';
+    div.innerHTML =
+      '<div class="author">' + esc(r.studentName) + '</div>' +
+      (r.text ? '<div class="body">' + esc(r.text) + '</div>' : '') +
+      img +
+      '<div class="time">' + fmtTime(r.createdAt) + '</div>' +
+      (state.isTeacher ? '<button class="del" onclick="App.delReflection(\'' + r.reflectionId + '\')">🗑</button>' : '');
+    return div;
+  }
+
+  // ---------- 投稿モーダル ----------
+  function openPost() {
+    var sel = document.getElementById('postStudent');
+    sel.innerHTML = '<option value="名無し">（名前を選択）</option>' +
+      state.students.map(function (s) {
+        var label = (s.number ? s.number + '. ' : '') + s.name;
+        return '<option value="' + esc(s.name) + '">' + esc(label) + '</option>';
+      }).join('');
+
+    document.getElementById('postText').value = '';
+    document.getElementById('postPhoto').value = '';
+    document.getElementById('postPreview').classList.add('hidden');
+    state.pendingPhoto = null;
+    state.selectedColor = COLORS[0];
+
+    var row = document.getElementById('colorRow');
+    row.innerHTML = COLORS.map(function (c, i) {
+      return '<div class="swatch' + (i === 0 ? ' active' : '') + '" style="background:' + c +
+        '" data-c="' + c + '" onclick="App.pickColor(this)"></div>';
+    }).join('');
+
+    document.getElementById('postModal').classList.remove('hidden');
+  }
+  function closePost() { document.getElementById('postModal').classList.add('hidden'); }
+
+  function pickColor(el) {
+    state.selectedColor = el.getAttribute('data-c');
+    Array.prototype.forEach.call(document.querySelectorAll('.swatch'), function (s) { s.classList.remove('active'); });
+    el.classList.add('active');
+  }
+
+  function submitPost() {
+    var name = document.getElementById('postStudent').value;
+    var text = document.getElementById('postText').value.trim();
+    if (!text && !state.pendingPhoto) { toast('テキストか写真を入れてください'); return; }
+
+    var btn = document.getElementById('postSubmit');
+    btn.disabled = true; btn.textContent = '投稿中…';
+    run('postReflection', state.board.boardId, name, text, state.selectedColor, state.pendingPhoto)
+      .then(function (r) {
+        closePost();
+        // 一覧を作り直して反映
+        openBoard(state.board.boardId);
+        toast('投稿しました！');
+      }).catch(function (err) {
+        showError(err);
+      }).then(function () {
+        btn.disabled = false; btn.textContent = '投稿する';
+      });
+  }
+
+  function delReflection(id) {
+    if (!confirm('この投稿を削除しますか？')) return;
+    run('deleteReflection', id).then(function () { openBoard(state.board.boardId); }).catch(showError);
+  }
+
+  // ---------- ナビ ----------
+  function goHome() {
+    state.isTeacher = false;
+    if (state.classInfo) { openBoardList(); } else { renderEntry(); }
+  }
+
+  function showError(err) {
+    console.error(err);
+    toast('エラー: ' + (err && err.message ? err.message : err));
+    if (!view().innerHTML || view().querySelector('.spinner')) renderEntry();
+  }
+
+  // ---------- 先生画面 ----------
+  function openTeacher() {
+    var pass = prompt('先生用パスコードを入力してください');
+    if (pass == null) return;
+    run('verifyTeacher', pass).then(function (ok) {
+      if (!ok) { toast('パスコードが違います'); return; }
+      state.isTeacher = true;
+      document.getElementById('teacherBtn').classList.add('hidden');
+      Teacher.open();
+    }).catch(showError);
+  }
+
+  return {
+    init: renderEntry,
+    enterClass: enterClass,
+    openBoardList: openBoardList,
+    openBoard: openBoard,
+    openPost: openPost,
+    closePost: closePost,
+    pickColor: pickColor,
+    submitPost: submitPost,
+    delReflection: delReflection,
+    goHome: goHome,
+    openTeacher: openTeacher,
+    // 共有ユーティリティ（Teacher から使用）
+    _: { run: run, esc: esc, toast: toast, spinner: spinner, view: view, setCrumb: setCrumb, showError: showError, state: state }
+  };
+})();
+
+// ====================== 先生画面 ======================
+var Teacher = (function () {
+  var U = App._;
+  var current = 'classes';
+  var selectedClass = null;
+
+  function open() {
+    selectedClass = null;
+    U.setCrumb('先生用管理画面');
+    render();
+  }
+
+  function tabs() {
+    return '<div class="teacher-tabs">' +
+      tab('classes', 'クラス・名簿') +
+      tab('boards', 'ボード作成') +
+      tab('reflections', '振り返り閲覧') +
+      '<button class="tab" onclick="App.goHome()">← 生徒画面に戻る</button>' +
+      '</div>';
+  }
+  function tab(id, label) {
+    return '<button class="tab' + (current === id ? ' active' : '') + '" onclick="Teacher.go(\'' + id + '\')">' + label + '</button>';
+  }
+
+  function go(id) { current = id; render(); }
+
+  function render() {
+    if (current === 'classes') return renderClasses();
+    if (current === 'boards') return renderBoards();
+    if (current === 'reflections') return renderReflections();
+  }
+
+  // --- クラス・名簿 ---
+  function renderClasses() {
+    U.spinner();
+    U.run('getClasses').then(function (classes) {
+      var html = tabs();
+      html += '<div class="section-title"><h2>クラス</h2></div>';
+      html += '<div class="row-form">' +
+        '<label class="field"><span>新しいクラス名</span><input id="newClass" placeholder="3年A組 など"></label>' +
+        '<button class="primary-btn" onclick="Teacher.addClass()">クラスを作成</button></div>';
+
+      if (!classes.length) {
+        html += '<div class="empty">まだクラスがありません。</div>';
+      } else {
+        html += '<table><tr><th>クラス名</th><th>クラスコード</th><th>操作</th></tr>';
+        classes.forEach(function (c) {
+          html += '<tr><td>' + U.esc(c.className) + '</td>' +
+            '<td><span class="code-pill">' + U.esc(c.classCode) + '</span></td>' +
+            '<td><button class="ghost-btn" onclick="Teacher.manageRoster(\'' + c.classCode + '\',\'' + U.esc(c.className) + '\')">名簿</button> ' +
+            '<button class="ghost-btn danger" onclick="Teacher.delClass(\'' + c.classCode + '\')">削除</button></td></tr>';
+        });
+        html += '</table>';
+      }
+      U.view().innerHTML = html;
+    }).catch(U.showError);
+  }
+
+  function addClass() {
+    var name = document.getElementById('newClass').value.trim();
+    if (!name) { U.toast('クラス名を入力してください'); return; }
+    U.run('createClass', name).then(function (c) {
+      U.toast('作成しました（コード: ' + c.classCode + '）');
+      renderClasses();
+    }).catch(U.showError);
+  }
+
+  function delClass(code) {
+    if (!confirm('このクラスと所属する名簿・ボード・振り返りをすべて削除します。よろしいですか？')) return;
+    U.run('deleteClass', code).then(function () { U.toast('削除しました'); renderClasses(); }).catch(U.showError);
+  }
+
+  function manageRoster(code, name) {
+    selectedClass = { classCode: code, className: name };
+    U.spinner();
+    U.run('getStudents', code).then(function (students) {
+      var html = tabs();
+      html += '<div class="section-title"><h2>' + U.esc(name) +
+        ' の名簿 <span class="code-pill">' + U.esc(code) + '</span></h2>' +
+        '<button class="ghost-btn" onclick="Teacher.go(\'classes\')">← クラス一覧</button></div>';
+
+      html += '<div class="row-form">' +
+        '<label class="field"><span>出席番号</span><input id="stNum" type="number" style="max-width:90px"></label>' +
+        '<label class="field"><span>名前</span><input id="stName" placeholder="山田 太郎"></label>' +
+        '<button class="primary-btn" onclick="Teacher.addStudent()">追加</button></div>';
+
+      html += '<div class="row-form">' +
+        '<label class="field"><span>一括登録（1行に1名。「1,山田太郎」のように番号付きも可）</span>' +
+        '<textarea id="bulk" rows="4" placeholder="1,山田太郎&#10;2,佐藤花子"></textarea></label>' +
+        '<button class="primary-btn" onclick="Teacher.bulkAdd()">一括登録</button></div>';
+
+      if (!students.length) {
+        html += '<div class="empty">まだ生徒が登録されていません。</div>';
+      } else {
+        html += '<table><tr><th>番号</th><th>名前</th><th>操作</th></tr>';
+        students.forEach(function (s) {
+          html += '<tr><td>' + U.esc(s.number) + '</td><td>' + U.esc(s.name) + '</td>' +
+            '<td><button class="ghost-btn danger" onclick="Teacher.removeStudent(\'' + U.esc(s.name) + '\')">削除</button></td></tr>';
+        });
+        html += '</table>';
+      }
+      U.view().innerHTML = html;
+    }).catch(U.showError);
+  }
+
+  function addStudent() {
+    var num = document.getElementById('stNum').value;
+    var name = document.getElementById('stName').value.trim();
+    if (!name) { U.toast('名前を入力してください'); return; }
+    U.run('addStudent', selectedClass.classCode, num, name).then(function () {
+      manageRoster(selectedClass.classCode, selectedClass.className);
+    }).catch(U.showError);
+  }
+  function bulkAdd() {
+    var text = document.getElementById('bulk').value;
+    if (!text.trim()) return;
+    U.run('importStudents', selectedClass.classCode, text).then(function () {
+      U.toast('登録しました');
+      manageRoster(selectedClass.classCode, selectedClass.className);
+    }).catch(U.showError);
+  }
+  function removeStudent(name) {
+    if (!confirm(name + ' を削除しますか？')) return;
+    U.run('removeStudent', selectedClass.classCode, name).then(function () {
+      manageRoster(selectedClass.classCode, selectedClass.className);
+    }).catch(U.showError);
+  }
+
+  // --- ボード作成 ---
+  var SUBJECTS = ['国語', '算数・数学', '理科', '社会', '英語', '音楽', '図工・美術', '体育', '道徳', '総合', '学活', 'その他'];
+
+  function renderBoards() {
+    U.spinner();
+    U.run('getClasses').then(function (classes) {
+      var html = tabs();
+      html += '<div class="section-title"><h2>ボードを作成</h2></div>';
+      if (!classes.length) {
+        html += '<div class="empty">先に「クラス・名簿」でクラスを作成してください。</div>';
+        U.view().innerHTML = html; return;
+      }
+      var today = new Date().toISOString().slice(0, 10);
+      html += '<div class="row-form">' +
+        '<label class="field"><span>クラス</span><select id="bClass">' +
+          classes.map(function (c) { return '<option value="' + c.classCode + '">' + U.esc(c.className) + '</option>'; }).join('') +
+        '</select></label>' +
+        '<label class="field"><span>教科</span><select id="bSubject">' +
+          SUBJECTS.map(function (s) { return '<option>' + s + '</option>'; }).join('') +
+        '</select></label>' +
+        '<label class="field"><span>日付</span><input type="date" id="bDate" value="' + today + '"></label>' +
+        '<label class="field"><span>タイトル（任意）</span><input id="bTitle" placeholder="例：実験のまとめ"></label>' +
+        '<button class="primary-btn" onclick="Teacher.createBoard()">作成</button></div>';
+
+      html += '<div id="boardListArea"></div>';
+      U.view().innerHTML = html;
+      reloadBoardList();
+    }).catch(U.showError);
+  }
+
+  function reloadBoardList() {
+    var code = document.getElementById('bClass').value;
+    U.run('getBoards', code).then(function (boards) {
+      var area = document.getElementById('boardListArea');
+      if (!boards.length) { area.innerHTML = '<div class="empty">このクラスにはまだボードがありません。</div>'; return; }
+      var html = '<div class="section-title"><h2>作成済みボード</h2></div><table><tr><th>教科</th><th>日付</th><th>タイトル</th><th>操作</th></tr>';
+      boards.forEach(function (b) {
+        html += '<tr><td>' + U.esc(b.subject) + '</td><td>' + U.esc(b.date) + '</td><td>' + U.esc(b.title) + '</td>' +
+          '<td><button class="ghost-btn danger" onclick="Teacher.delBoard(\'' + b.boardId + '\')">削除</button></td></tr>';
+      });
+      html += '</table>';
+      area.innerHTML = html;
+    }).catch(U.showError);
+  }
+
+  function createBoard() {
+    var code = document.getElementById('bClass').value;
+    var subject = document.getElementById('bSubject').value;
+    var date = document.getElementById('bDate').value;
+    var title = document.getElementById('bTitle').value.trim();
+    U.run('createBoard', code, subject, date, title).then(function () {
+      U.toast('ボードを作成しました');
+      document.getElementById('bTitle').value = '';
+      reloadBoardList();
+    }).catch(U.showError);
+  }
+  function delBoard(id) {
+    if (!confirm('このボードと投稿された振り返りをすべて削除します。よろしいですか？')) return;
+    U.run('deleteBoard', id).then(function () { U.toast('削除しました'); reloadBoardList(); }).catch(U.showError);
+  }
+
+  // --- 振り返り閲覧 ---
+  function renderReflections() {
+    U.spinner();
+    U.run('getClasses').then(function (classes) {
+      var html = tabs();
+      html += '<div class="section-title"><h2>振り返りを閲覧</h2></div>';
+      if (!classes.length) { html += '<div class="empty">クラスがありません。</div>'; U.view().innerHTML = html; return; }
+      html += '<div class="row-form"><label class="field"><span>クラス</span><select id="rClass" onchange="Teacher.loadBoardsForView()">' +
+        classes.map(function (c) { return '<option value="' + c.classCode + '">' + U.esc(c.className) + '</option>'; }).join('') +
+        '</select></label>' +
+        '<label class="field"><span>ボード</span><select id="rBoard" onchange="Teacher.loadReflectionView()"></select></label></div>';
+      html += '<div id="refArea"></div>';
+      U.view().innerHTML = html;
+      loadBoardsForView();
+    }).catch(U.showError);
+  }
+
+  function loadBoardsForView() {
+    var code = document.getElementById('rClass').value;
+    U.run('getBoards', code).then(function (boards) {
+      var sel = document.getElementById('rBoard');
+      if (!boards.length) { sel.innerHTML = '<option value="">（ボードなし）</option>'; document.getElementById('refArea').innerHTML = '<div class="empty">このクラスにはボードがありません。</div>'; return; }
+      sel.innerHTML = boards.map(function (b) {
+        return '<option value="' + b.boardId + '">' + U.esc(b.subject + ' / ' + b.date + ' / ' + b.title) + '</option>';
+      }).join('');
+      loadReflectionView();
+    }).catch(U.showError);
+  }
+
+  function loadReflectionView() {
+    var boardId = document.getElementById('rBoard').value;
+    if (!boardId) return;
+    // 生徒画面と同じボード表示を流用（削除ボタン付き）
+    App._.state.isTeacher = true;
+    Promise.all([U.run('getBoard', boardId), U.run('getReflections', boardId)]).then(function (res) {
+      var board = res[0], refs = res[1];
+      var area = document.getElementById('refArea');
+      if (!refs.length) { area.innerHTML = '<div class="empty">まだ投稿がありません。</div>'; return; }
+      area.innerHTML = '<div style="margin:10px 0;color:var(--muted)">投稿数: ' + refs.length + '件</div><div class="cards" id="tCards"></div>';
+      var c = document.getElementById('tCards');
+      App._.state.board = board;
+      refs.forEach(function (r) {
+        var div = document.createElement('div');
+        div.className = 'card'; div.style.background = r.color || '#fff7c0';
+        var img = r.photoUrl ? '<img src="' + U.esc(r.photoUrl) + '" loading="lazy" referrerpolicy="no-referrer">' : '';
+        div.innerHTML = '<div class="author">' + U.esc(r.studentName) + '</div>' +
+          (r.text ? '<div class="body">' + U.esc(r.text) + '</div>' : '') + img +
+          '<div class="time">' + (function (d) { var dt = new Date(d); return (dt.getMonth() + 1) + '/' + dt.getDate(); })(r.createdAt) + '</div>' +
+          '<button class="del" onclick="App.delReflection(\'' + r.reflectionId + '\')">🗑</button>';
+        c.appendChild(div);
+      });
+    }).catch(U.showError);
+  }
+
+  return {
+    open: open, go: go, addClass: addClass, delClass: delClass,
+    manageRoster: manageRoster, addStudent: addStudent, bulkAdd: bulkAdd, removeStudent: removeStudent,
+    renderBoards: renderBoards, createBoard: createBoard, delBoard: delBoard, reloadBoardList: reloadBoardList,
+    loadBoardsForView: loadBoardsForView, loadReflectionView: loadReflectionView
+  };
+})();
+
+// 写真選択イベント
+document.getElementById('postPhoto').addEventListener('change', function () { App._photoChange(this); });
+App._photoChange = function (input) {
+  var file = input.files[0];
+  if (!file) { App._.state.pendingPhoto = null; return; }
+  var reader = new FileReader();
+  reader.onload = function (e) {
+    var dataUrl = e.target.result;
+    App._.state.pendingPhoto = { data: dataUrl.split(',')[1], mimeType: file.type, filename: file.name };
+    var prev = document.getElementById('postPreview');
+    prev.src = dataUrl; prev.classList.remove('hidden');
+  };
+  reader.readAsDataURL(file);
+};
+
+// クラス選択変更時にボード一覧を更新（ボード作成タブ）
+document.addEventListener('change', function (e) {
+  if (e.target && e.target.id === 'bClass') Teacher.reloadBoardList();
+});
+
+window.onload = App.init;
+</script>
