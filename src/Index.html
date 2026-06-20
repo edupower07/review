@@ -254,6 +254,8 @@
 //  クライアント（単一ファイル）
 // ============================================================
 var App = (function(){
+  // サーバー(Code.gs)の APP_BUILD と必ず一致させること。ズレていれば「デプロイ未更新」を警告する。
+  var APP_BUILD = '9';
   var COLORS = ['#fff7c0','#ffd1dc','#c8f0d0','#cfe3ff','#e8d6ff','#ffe2bf','#ffffff'];
   // セクションの色分け用パレット（先生が選ぶ）
   var SECTION_COLORS = ['#e8554e','#e08a3c','#d9a400','#2faf6b','#2796a8','#3f7fd6','#8c5bd0','#d24b8c','#7a8b3c','#6a7a8c'];
@@ -337,6 +339,7 @@ var App = (function(){
       +'<div class="login-foot" id="loginFoot"></div>'
       +'</div></div></div>';
     run('getLoginInfo').then(function(info){
+      checkBuild(info.build);
       var grid=$('nameGrid'); if(grid) grid.innerHTML='';
       if(!info.students.length){
         if(grid) grid.innerHTML='<div class="empty" style="grid-column:1/-1">まだ名簿が登録されていません。<br>先生用ログインから名簿を登録してください。</div>';
@@ -354,6 +357,14 @@ var App = (function(){
       if(foot) foot.innerHTML='<button class="ghost-btn" onclick="App.teacherLogin()">🧑‍🏫 先生用ログイン'
         +(info.teacherSet?'':'（初回設定）')+'</button>';
     }).catch(err);
+  }
+  // サーバー(デプロイ済みコード)が最新かを確認。古ければ赤バナーで警告する。
+  function checkBuild(serverBuild){
+    if(serverBuild===APP_BUILD) return;
+    showErrorBanner('アプリのコードが新しくなっていますが、ウェブアプリのデプロイが古いままです'
+      +'（画面: '+APP_BUILD+' / サーバー: '+(serverBuild||'不明')+'）。'
+      +'Apps Scriptで「デプロイを管理 → 編集 → バージョン: 新バージョン」を実行し、'
+      +'初回は setup 関数を実行して権限を承認してください。');
   }
   function exitLoginMode(){ document.body.classList.remove('login-mode'); }
 
@@ -1101,6 +1112,7 @@ var App = (function(){
     _:{run:run,esc:esc,toast:toast,spinner:spinner,view:view,setCrumb:setCrumb,err:err,modal:modal,closeModal:closeModal,fmt:fmt,
        getTeacherPass:function(){return teacherPass;},setTeacherPass:function(p){teacherPass=p;},
        getTeacherName:function(){return teacherName;},setTeacherName:function(n){teacherName=n;updateHeader();},
+       appBuild:function(){return APP_BUILD;},
        COLORS:COLORS,subjColor:subjColor}
   };
 })();
@@ -1141,8 +1153,27 @@ var Teacher=(function(){
         +'<label class="field"><span>もう一度入力</span><input id="tNewPw2" type="password" autocomplete="new-password"></label>'
         +'<button class="primary-btn" onclick="Teacher.savePw()">変更する</button></div>'
         +'<p style="color:var(--muted);font-size:13px">※変更後はこのまま使えます（次回ログインから新しいパスワード）。</p>';
+      html+='<div class="section-title" style="margin-top:24px"><h2>システム状態（動作確認）</h2></div>'
+        +'<div id="sysInfo" class="row-form"><span style="color:var(--muted)">確認中…</span></div>';
       U.view().innerHTML=html;
+      loadSysInfo();
     }).catch(U.err);
+  }
+  function loadSysInfo(){
+    U.run('getServerInfo').then(function(s){
+      var ok=(s.build===U.appBuild());
+      var lines=[];
+      lines.push((ok?'✅':'⚠️')+' デプロイ：'+(ok?'最新です':'<b style="color:#c0392b">古いです（デプロイのバージョン更新が必要）</b>')
+        +'（画面 '+U.appBuild()+' / サーバー '+U.esc(s.build||'不明')+'）');
+      lines.push((s.urlFetch?'✅':'⚠️')+' リンクの読み込み権限：'+(s.urlFetch?'有効です'
+        :'<b style="color:#c0392b">無効</b>（appsscript.json に外部リクエスト権限が必要。setup実行で再承認）')
+        +(s.urlFetchError?'<br><span style="color:var(--muted);font-size:12px">'+U.esc(s.urlFetchError)+'</span>':''));
+      var box=document.getElementById('sysInfo');
+      if(box) box.innerHTML='<div style="line-height:2">'+lines.join('<br>')+'</div>';
+    }).catch(function(e){
+      var box=document.getElementById('sysInfo');
+      if(box) box.innerHTML='<span style="color:#c0392b">確認できませんでした：'+U.esc((e&&e.message)||e)+'</span>';
+    });
   }
   function saveName(){
     var name=document.getElementById('tName').value.trim();

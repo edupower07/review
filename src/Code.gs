@@ -13,6 +13,9 @@ var PROP_TEACHER_NAME = 'TEACHER_NAME';
 var PROP_SCHEMA_VERSION = 'SCHEMA_VERSION';
 // SHEET_DEFS を変更したら必ずこの版数を上げる（次回アクセス時に1回だけ移行が走る）
 var SCHEMA_VERSION = '8';
+// クライアント(Index.html)の APP_BUILD と必ず一致させること。
+// デプロイ更新忘れ（古いコードが動いている状態）を検知するために使う。
+var APP_BUILD = '9';
 
 var SHEET_STUDENTS = 'Students';
 var SHEET_BOARDS = 'Boards';
@@ -235,7 +238,20 @@ function getLoginInfo() {
   });
   students.sort(function (a, b) { return (a.number || 0) - (b.number || 0); });
   var teacherSet = !!PropertiesService.getScriptProperties().getProperty(PROP_TEACHER_HASH);
-  return { students: students, teacherSet: teacherSet };
+  return { students: students, teacherSet: teacherSet, build: APP_BUILD };
+}
+
+/** デプロイ状態の診断用。クライアントの APP_BUILD と一致していれば最新。 */
+function getServerInfo() {
+  // 外部リクエスト権限（UrlFetchApp）が使えるか実際に試す
+  var urlFetch = false, urlFetchError = '';
+  try {
+    UrlFetchApp.fetch('https://www.google.com/generate_204', { muteHttpExceptions: true, followRedirects: false });
+    urlFetch = true;
+  } catch (e) {
+    urlFetchError = String((e && e.message) || e);
+  }
+  return { build: APP_BUILD, schema: SCHEMA_VERSION, urlFetch: urlFetch, urlFetchError: urlFetchError };
 }
 
 /** 生徒ログイン。初回（パスワード未設定）はここで設定します。 */
