@@ -257,7 +257,7 @@
 // ============================================================
 var App = (function(){
   // サーバー(Code.gs)の APP_BUILD と必ず一致させること。ズレていれば「デプロイ未更新」を警告する。
-  var APP_BUILD = '10';
+  var APP_BUILD = '11';
   var COLORS = ['#fff7c0','#ffd1dc','#c8f0d0','#cfe3ff','#e8d6ff','#ffe2bf','#ffffff'];
   // セクションの色分け用パレット（先生が選ぶ）
   var SECTION_COLORS = ['#e8554e','#e08a3c','#d9a400','#2faf6b','#2796a8','#3f7fd6','#8c5bd0','#d24b8c','#7a8b3c','#6a7a8c'];
@@ -916,6 +916,8 @@ var App = (function(){
       +'<div id="mRemoveWrap" style="margin-bottom:12px"></div>'
       +'<label class="field"><span>リンク（URL・任意）</span>'
         +'<input id="mLink" type="url" placeholder="https://… を貼り付け" inputmode="url"></label>'
+      +'<label class="field"><span>リンクの表示名（自動取得・編集できます）</span>'
+        +'<input id="mLinkTitle" type="text" placeholder="ページのタイトル" oninput="App.onLinkTitle(this.value)"></label>'
       +'<div style="margin:-6px 0 12px;display:flex;gap:8px;flex-wrap:wrap">'
         +'<button type="button" class="ghost-btn" onclick="App.previewLink()">🔗 プレビューを取得</button></div>'
       +'<div id="mLinkPrev" style="margin-bottom:12px"></div>'
@@ -928,6 +930,7 @@ var App = (function(){
     [].forEach.call(row.children,function(sw){sw.addEventListener('click',function(){pickedColor=sw.dataset.c;[].forEach.call(row.children,function(x){x.classList.remove('active');});sw.classList.add('active');});});
     $('mFile').addEventListener('change',onFile);
     if($('mLink')) $('mLink').value=pendingLink?pendingLink.url:'';
+    if($('mLinkTitle')) $('mLinkTitle').value=(pendingLink&&pendingLink.title&&pendingLink.title!==pendingLink.site)?pendingLink.title:'';
     renderMediaPreview();
     renderLinkPreview();
   }
@@ -957,9 +960,47 @@ var App = (function(){
     if(!url){ pendingLink=null; removeLink=true; renderLinkPreview(); return; }
     var lk=buildLinkLocal(url);
     if(!lk){ toast('URLの形式が正しくありません'); return; }
+    var manual=$('mLinkTitle')?$('mLinkTitle').value.trim():'';
+    if(manual) lk.title=manual;
     pendingLink=lk; removeLink=false;
     if($('mLink')) $('mLink').value=lk.url;
     renderLinkPreview();
+    // 表示名が未入力なら、ブラウザからページのタイトルを取得（権限不要・失敗してもドメイン表示のまま）
+    if(!manual){
+      var box=$('mLinkPrev');
+      if(box) box.insertAdjacentHTML('afterbegin','<div id="lkLoad" style="color:var(--muted);font-size:13px;margin-bottom:6px">タイトルを取得中…</div>');
+      fetchTitleViaProxy(lk.url).then(function(title){
+        var ld=$('lkLoad'); if(ld)ld.remove();
+        if(title && pendingLink && pendingLink.url===lk.url){
+          pendingLink.title=title;
+          if($('mLinkTitle')) $('mLinkTitle').value=title;
+          renderLinkPreview();
+        }
+      }).catch(function(){ var ld=$('lkLoad'); if(ld)ld.remove(); });
+    }
+  }
+  function onLinkTitle(v){ if(pendingLink){ pendingLink.title=(v||'').trim()||pendingLink.site; renderLinkPreview(); } }
+  function decodeHtml(s){ var t=document.createElement('textarea'); t.innerHTML=String(s||''); return t.value.trim(); }
+  function extractTitle(html){
+    html=String(html||'');
+    var og=html.match(/<meta[^>]+(?:property|name)=["']og:title["'][^>]*>/i);
+    if(og){ var c=og[0].match(/content=["']([\s\S]*?)["']/i); if(c&&c[1].trim()) return decodeHtml(c[1].trim()); }
+    var t=html.match(/<title[^>]*>([\s\S]*?)<\/title>/i);
+    return t?decodeHtml(t[1]):'';
+  }
+  // 生徒のブラウザから取得（CORSプロキシ経由）。複数候補を順に試す。
+  function fetchTitleViaProxy(url){
+    var tries=[
+      'https://api.allorigins.win/raw?url='+encodeURIComponent(url),
+      'https://corsproxy.io/?url='+encodeURIComponent(url)
+    ];
+    function attempt(i){
+      if(i>=tries.length) return Promise.resolve('');
+      return fetch(tries[i]).then(function(r){ if(!r.ok) throw 0; return r.text(); })
+        .then(function(html){ var t=extractTitle(html); return t||attempt(i+1); })
+        .catch(function(){ return attempt(i+1); });
+    }
+    return attempt(0);
   }
   function clearLink(){ pendingLink=null; removeLink=true; if($('mLink'))$('mLink').value=''; renderLinkPreview(); }
   function renderLinkPreview(){
@@ -1123,7 +1164,7 @@ var App = (function(){
     pickName:pickName, doLogin:doLogin, teacherLogin:teacherLogin, doTeacherLogin:doTeacherLogin,
     boardList:boardList, openBoard:openBoard, refreshBoard:refreshBoard, leaveBoard:leaveBoard,
     openPost:openPost, openEdit:openEdit, submitMedia:submitMedia, clearMedia:clearMedia,
-    previewLink:previewLink, clearLink:clearLink,
+    previewLink:previewLink, clearLink:clearLink, onLinkTitle:onLinkTitle,
     addSection:addSection, setSort:setSort,
     onSearch:onSearch, toggleMine:toggleMine, toggleMedia:toggleMedia,
     insertTemplate:insertTemplate,
