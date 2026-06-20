@@ -11,7 +11,7 @@ var PROP_TEACHER_HASH = 'TEACHER_HASH';
 var PROP_TEACHER_SALT = 'TEACHER_SALT';
 var PROP_SCHEMA_VERSION = 'SCHEMA_VERSION';
 // SHEET_DEFS を変更したら必ずこの版数を上げる（次回アクセス時に1回だけ移行が走る）
-var SCHEMA_VERSION = '6';
+var SCHEMA_VERSION = '7';
 
 var SHEET_STUDENTS = 'Students';
 var SHEET_BOARDS = 'Boards';
@@ -29,7 +29,11 @@ SHEET_DEFS[SHEET_SECTIONS] = ['sectionId', 'boardId', 'name', 'sortOrder', 'crea
 // 末尾の sectionId / mediaType / updatedAt / pinned / title は後から追加した列（既存データは移行で保持）
 SHEET_DEFS[SHEET_REFLECTIONS] = ['reflectionId', 'boardId', 'studentName', 'text', 'photoUrl', 'photoFileId', 'color', 'sortOrder', 'createdAt', 'sectionId', 'mediaType', 'updatedAt', 'pinned', 'title'];
 SHEET_DEFS[SHEET_COMMENTS] = ['commentId', 'reflectionId', 'author', 'text', 'createdAt'];
-SHEET_DEFS[SHEET_LIKES] = ['reflectionId', 'studentName', 'createdAt'];
+// 末尾の type は後から追加した列（リアクションの種類。空＝❤）
+SHEET_DEFS[SHEET_LIKES] = ['reflectionId', 'studentName', 'createdAt', 'type'];
+
+// 使えるリアクション（先頭が既定＝❤）
+var REACTIONS = ['❤', '👍', '😲', '🤔', '😢'];
 
 // ============================ エントリ ============================
 
@@ -360,6 +364,10 @@ function resetStudentPassword(name) {
 function getBoards(includeArchived) {
   var boards = readSheet_(SHEET_BOARDS).map(rowToBoard_);
   if (!includeArchived) boards = boards.filter(function (b) { return !b.archived; });
+  // 未読バッジ用に各ボードの投稿数を付与（Reflections を1回読むだけ）
+  var counts = {};
+  readSheet_(SHEET_REFLECTIONS).forEach(function (r) { counts[r.boardId] = (counts[r.boardId] || 0) + 1; });
+  boards.forEach(function (b) { b.cardCount = counts[b.boardId] || 0; });
   boards.sort(function (a, b) { return new Date(b.createdAt) - new Date(a.createdAt); });
   return boards;
 }
@@ -518,12 +526,18 @@ function getBoardData(boardId, currentName) {
 
   var refs = readSheet_(SHEET_REFLECTIONS).filter(function (r) { return r.boardId === boardId; });
 
-  // いいね集計
+  // リアクション集計（種類別）。type 空は ❤ とみなす。
   var likes = readSheet_(SHEET_LIKES);
-  var likeCount = {}, likedByMe = {};
+  var likeCount = {}, reactByRef = {}, myReactByRef = {};
   likes.forEach(function (l) {
+    var t = l.type || '❤';
     likeCount[l.reflectionId] = (likeCount[l.reflectionId] || 0) + 1;
-    if (l.studentName === currentName) likedByMe[l.reflectionId] = true;
+    var m = reactByRef[l.reflectionId] = reactByRef[l.reflectionId] || {};
+    m[t] = (m[t] || 0) + 1;
+    if (l.studentName === currentName) {
+      var mm = myReactByRef[l.reflectionId] = myReactByRef[l.reflectionId] || {};
+      mm[t] = true;
+    }
   });
 
   // コメント集計
@@ -553,7 +567,8 @@ function getBoardData(boardId, currentName) {
       updatedAt: toMs_(r.updatedAt),
       pinned: r.pinned === true || r.pinned === 'true' || r.pinned === 1,
       likeCount: likeCount[r.reflectionId] || 0,
-      likedByMe: !!likedByMe[r.reflectionId],
+      reactions: reactByRef[r.reflectionId] || {},
+      myReactions: myReactByRef[r.reflectionId] || {},
       comments: byRef[r.reflectionId] || []
     };
   });
@@ -751,20 +766,30 @@ function updateOrder(boardId, orderedIds) {
   return true;
 }
 
-// --- いいね ---
-function toggleLike(reflectionId, studentName, password) {
+// --- リアクション（複数種類） ---
+function toggleReaction(reflectionId, studentName, password, type) {
   if (!verifyStudent_(studentName, password)) throw new Error('ログイン情報が正しくありません。');
+  type = String(type || '❤');
+  if (REACTIONS.indexOf(type) < 0) type = '❤';
   var sheet = getSheet_(SHEET_LIKES);
   var existing = readSheet_(SHEET_LIKES).filter(function (l) {
-    return l.reflectionId === reflectionId && l.studentName === studentName;
+    return l.reflectionId === reflectionId && l.studentName === studentName && (l.type || '❤') === type;
   })[0];
   if (existing) {
     sheet.deleteRow(existing._row);
   } else {
-    sheet.appendRow([reflectionId, studentName, new Date()]);
+    sheet.appendRow([reflectionId, studentName, new Date(), type]);
   }
-  var count = readSheet_(SHEET_LIKES).filter(function (l) { return l.reflectionId === reflectionId; }).length;
-  return { count: count, liked: !existing };
+  // 更新後の種類別集計と自分の反応を返す
+  var reactions = {}, mine = {}, total = 0;
+  readSheet_(SHEET_LIKES).forEach(function (l) {
+    if (l.reflectionId !== reflectionId) return;
+    var t = l.type || '❤';
+    reactions[t] = (reactions[t] || 0) + 1;
+    total++;
+    if (l.studentName === studentName) mine[t] = true;
+  });
+  return { reactions: reactions, myReactions: mine, count: total };
 }
 
 // --- コメント ---

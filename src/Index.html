@@ -88,6 +88,22 @@
     .board-bar .bar-actions{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
     .sort-select{border:1px solid var(--border);border-radius:10px;padding:8px 10px;font-family:inherit;
       font-size:14px;background:#fff;color:var(--text)}
+    /* 絞り込みバー */
+    .filter-bar{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:14px}
+    .filter-bar .search{flex:1;min-width:180px;border:1px solid var(--border);border-radius:10px;
+      padding:8px 12px;font-family:inherit;font-size:14px;background:#fff}
+    .filter-bar label{display:flex;align-items:center;gap:5px;font-size:14px;color:var(--text);
+      background:#fff;border:1px solid var(--border);border-radius:10px;padding:7px 11px;cursor:pointer}
+    .filter-bar label input{accent-color:var(--accent2)}
+    .filter-bar .fcount{color:var(--muted);font-size:13px}
+    /* 投稿テンプレート */
+    .tmpl-row{display:flex;gap:6px;flex-wrap:wrap;margin:-6px 0 12px}
+    .tmpl-row button{background:#f3eee6;border:1px solid var(--border);border-radius:999px;
+      padding:5px 11px;font-size:13px;cursor:pointer}
+    .tmpl-row button:hover{background:#e9e1d3}
+    /* 未読バッジ */
+    .board-card .new-badge{position:absolute;top:-8px;right:-8px;background:var(--accent);color:#fff;
+      font-size:12px;font-weight:700;border-radius:999px;padding:3px 9px;box-shadow:0 2px 6px rgba(0,0,0,.25)}
 
     /* セクション（横に並ぶ列・列内だけスクロール） */
     #board{display:flex;gap:16px;align-items:stretch;overflow-x:auto;
@@ -144,9 +160,11 @@
       padding:9px 12px;font-size:14px;cursor:pointer}
     .card .menu button:hover{background:#f3eee6}
     .card .menu button.danger{color:var(--accent)}
-    .card-actions{display:flex;gap:12px;margin-top:8px;font-size:14px;align-items:center}
-    .card-actions .act{cursor:pointer;user-select:none;background:rgba(255,255,255,.5);border:none;border-radius:8px;padding:3px 8px}
-    .card-actions .act.liked{color:var(--accent);font-weight:700}
+    .card-actions{display:flex;gap:6px;margin-top:8px;font-size:14px;align-items:center;flex-wrap:wrap}
+    .card-actions .act{cursor:pointer;user-select:none;background:rgba(255,255,255,.5);border:1px solid transparent;border-radius:999px;padding:3px 8px;line-height:1.2}
+    .card-actions .act:hover{background:rgba(0,0,0,.06)}
+    .card-actions .act.on{background:#fff;border-color:var(--accent2);font-weight:700}
+    .card-actions .act .rc{font-size:12px;color:#555}
     .comments{margin-top:8px;border-top:1px solid rgba(0,0,0,.08);padding-top:6px}
     .comment{font-size:13px;margin-bottom:4px;line-height:1.4}
     .comment b{font-weight:700}
@@ -375,6 +393,11 @@ var App = (function(){
     else { w.textContent=''; b.classList.add('hidden'); }
   }
 
+  // 未読バッジ用：ボードごとに「最後に開いたときの投稿数」を端末に記録
+  function seenKey(id){ return 'mb_seen_'+(user?user.name:'_')+'_'+id; }
+  function getSeen(id){ try{ var v=localStorage.getItem(seenKey(id)); return v==null?null:parseInt(v,10); }catch(e){ return null; } }
+  function setSeen(id,n){ try{ localStorage.setItem(seenKey(id),String(n)); }catch(e){} }
+
   // ============== 生徒：ボード一覧 ==============
   function boardList(){
     stopPolling();
@@ -388,10 +411,14 @@ var App = (function(){
         html+='<div class="grid">';
         boards.forEach(function(b){
           var col=subjColor(b.subject);
+          var seen=getSeen(b.boardId), cc=b.cardCount||0;
+          var nNew=(seen==null)?0:Math.max(0,cc-seen);
+          var badge=nNew>0?'<span class="new-badge">+'+nNew+'</span>':'';
           html+='<div class="board-card" style="border-top:6px solid '+col+'" onclick="App.openBoard('+JSON.stringify(b.boardId).replace(/"/g,'&quot;')+')">'
+            +badge
             +'<span class="subject-chip" style="background:'+col+'">'+esc(b.subject)+'</span>'
             +'<h3>'+esc(b.title)+'</h3>'
-            +'<div class="meta">'+esc(b.unit)+' ・ '+esc(b.date)+'</div></div>';
+            +'<div class="meta">'+esc(b.unit)+' ・ '+esc(b.date)+' ・ 投稿'+cc+'件</div></div>';
         });
         html+='</div>';
       }
@@ -405,7 +432,9 @@ var App = (function(){
     current.sections=data.sections||[];
     current.cards=data.cards||[];
   }
+  var REACTIONS=['❤','👍','😲','🤔','😢'];
   var sortMode='manual';   // 'manual'(古い順/ドラッグ順) | 'new' | 'likes' | 'comments'
+  var filterText='', onlyMine=false, onlyMedia=false;  // 絞り込み状態
   function clientCardCmp(a,b){
     // ピン留めは常に先頭
     if(!!a.pinned!==!!b.pinned) return a.pinned?-1:1;
@@ -422,6 +451,7 @@ var App = (function(){
     spinner();
     run('getBoardData',boardId,user?user.name:null).then(function(data){
       applyBoardData(data);
+      setSeen(boardId, current.cards.length);  // 開いた時点の投稿数を既読として記録
       setCrumb('ボード › '+data.board.title);
       renderBoard();
       startPolling(boardId);
@@ -443,7 +473,14 @@ var App = (function(){
       +'<button class="ghost-btn" onclick="App.refreshBoard()">↻ 更新</button>'
       +'<button class="ghost-btn" onclick="App.leaveBoard()">← ボード一覧</button>'
       +'</div></div>';
-    view().innerHTML=bar+'<div id="board"></div>';
+    // 絞り込みバー（検索・自分だけ・写真つきだけ）
+    var fbar='<div class="filter-bar">'
+      +'<input class="search" type="search" placeholder="🔍 名前・内容・コメントで検索" value="'+esc(filterText)+'" oninput="App.onSearch(this.value)">'
+      +(user?'<label><input type="checkbox" '+(onlyMine?'checked':'')+' onchange="App.toggleMine(this.checked)">自分の投稿だけ</label>':'')
+      +'<label><input type="checkbox" '+(onlyMedia?'checked':'')+' onchange="App.toggleMedia(this.checked)">写真・動画つきだけ</label>'
+      +'<span class="fcount" id="fcount"></span>'
+      +'</div>';
+    view().innerHTML=bar+fbar+'<div id="board"></div>';
     var board=$('board');
 
     // セクションごとにカードを振り分け
@@ -457,7 +494,38 @@ var App = (function(){
 
     cols.forEach(function(sec){ board.appendChild(buildColumn(sec, bySection[sec.sectionId]||[], isTeacher)); });
     setupDnD(board);
+    applyFilters();
     lastSig=computeSig();
+  }
+
+  // -------- 絞り込み（クライアント側のみ・通信なし） --------
+  function onSearch(v){ filterText=v; applyFilters(); }
+  function toggleMine(b){ onlyMine=b; applyFilters(); }
+  function toggleMedia(b){ onlyMedia=b; applyFilters(); }
+  function applyFilters(){
+    var board=$('board'); if(!board)return;
+    var q=filterText.trim().toLowerCase();
+    var shown=0;
+    [].slice.call(board.querySelectorAll('.section-col')).forEach(function(col){
+      var vis=0;
+      [].slice.call(col.querySelectorAll('.card')).forEach(function(node){
+        var r=findCard(node.dataset.id), ok=true;
+        if(r){
+          if(onlyMine && !(user&&r.studentName===user.name)) ok=false;
+          if(ok && onlyMedia && !r.photoUrl) ok=false;
+          if(ok && q){
+            var hay=((r.studentName||'')+' '+(r.title||'')+' '+(r.text||'')+' '
+              +(r.comments?r.comments.map(function(c){return c.author+' '+c.text;}).join(' '):'')).toLowerCase();
+            if(hay.indexOf(q)<0) ok=false;
+          }
+        }
+        node.style.display=ok?'':'none';
+        if(ok){vis++;shown++;}
+      });
+      var cnt=col.querySelector('.col-title .count'); if(cnt) cnt.textContent=vis;
+    });
+    var fc=$('fcount');
+    if(fc) fc.textContent=(q||onlyMine||onlyMedia)?('表示 '+shown+' 件'):'';
   }
 
   function buildColumn(sec, cards, isTeacher){
@@ -536,12 +604,18 @@ var App = (function(){
       +(r.text?'<div class="body">'+esc(r.text)+'</div>':'')
       +media
       +'<div class="card-actions">'
-      +'<button class="act like'+(r.likedByMe?' liked':'')+'">❤ <span class="lc">'+r.likeCount+'</span></button>'
+      +REACTIONS.map(function(t){
+          var cnt=(r.reactions&&r.reactions[t])||0;
+          var on=(r.myReactions&&r.myReactions[t])?' on':'';
+          return '<button class="act react'+on+'" data-type="'+esc(t)+'">'+t+' <span class="rc">'+(cnt||'')+'</span></button>';
+        }).join('')
       +'</div>'
       +'<div class="comments"></div>';
     d.innerHTML=html;
 
-    d.querySelector('.like').addEventListener('click',function(e){e.stopPropagation();like(r,d);});
+    [].forEach.call(d.querySelectorAll('.react'),function(btn){
+      btn.addEventListener('click',function(e){e.stopPropagation();react(r,d,btn.dataset.type);});
+    });
     // メディアをクリック／⛶で拡大表示
     [].forEach.call(d.querySelectorAll('[data-file]'),function(el){
       el.addEventListener('click',function(e){ e.stopPropagation(); openLightbox(el.dataset.file, el.dataset.kind); });
@@ -597,18 +671,29 @@ var App = (function(){
     if(old && old.parentNode){ old.parentNode.replaceChild(cardEl(card),old); } else { refreshBoard(); }
   }
 
-  // 楽観的いいね（先にUI更新→裏で保存）
-  function like(r,d){
-    if(!user){toast('いいねは生徒ログインが必要です');return;}
-    var nl=!r.likedByMe; r.likedByMe=nl; r.likeCount=Math.max(0,r.likeCount+(nl?1:-1));
-    var btn=d.querySelector('.like'); btn.classList.toggle('liked',nl); d.querySelector('.lc').textContent=r.likeCount;
-    lastSig=computeSig();
-    run('toggleLike',r.reflectionId,user.name,user.password).then(function(res){
-      r.likeCount=res.count; r.likedByMe=res.liked;
-      btn.classList.toggle('liked',res.liked); d.querySelector('.lc').textContent=res.count; lastSig=computeSig();
+  // 楽観的リアクション（先にUI更新→裏で保存）
+  function react(r,d,type){
+    if(!user){toast('リアクションは生徒ログインが必要です');return;}
+    r.reactions=r.reactions||{}; r.myReactions=r.myReactions||{};
+    var have=!!r.myReactions[type];
+    if(have){ delete r.myReactions[type]; r.reactions[type]=Math.max(0,(r.reactions[type]||0)-1); r.likeCount=Math.max(0,(r.likeCount||0)-1); }
+    else { r.myReactions[type]=true; r.reactions[type]=(r.reactions[type]||0)+1; r.likeCount=(r.likeCount||0)+1; }
+    updateReactDom(r,d); lastSig=computeSig();
+    run('toggleReaction',r.reflectionId,user.name,user.password,type).then(function(res){
+      r.reactions=res.reactions; r.myReactions=res.myReactions; r.likeCount=res.count;
+      updateReactDom(r,d); lastSig=computeSig();
     }).catch(function(e){
-      r.likedByMe=!nl; r.likeCount=Math.max(0,r.likeCount+(nl?-1:1));
-      btn.classList.toggle('liked',r.likedByMe); d.querySelector('.lc').textContent=r.likeCount; err(e);
+      // 失敗時は楽観更新を戻す
+      if(have){ r.myReactions[type]=true; r.reactions[type]=(r.reactions[type]||0)+1; r.likeCount=(r.likeCount||0)+1; }
+      else { delete r.myReactions[type]; r.reactions[type]=Math.max(0,(r.reactions[type]||0)-1); r.likeCount=Math.max(0,(r.likeCount||0)-1); }
+      updateReactDom(r,d); err(e);
+    });
+  }
+  function updateReactDom(r,d){
+    [].forEach.call(d.querySelectorAll('.react'),function(btn){
+      var t=btn.dataset.type, cnt=(r.reactions&&r.reactions[t])||0;
+      btn.classList.toggle('on',!!(r.myReactions&&r.myReactions[t]));
+      btn.querySelector('.rc').textContent=cnt||'';
     });
   }
 
@@ -747,7 +832,7 @@ var App = (function(){
           run('getBoardData',boardId,user?user.name:null).then(function(data){
             if(!current.board||current.board.boardId!==boardId) return;
             if(busy()) return; // 取得中に操作が始まったら今回はスキップ
-            applyBoardData(data); renderBoard();
+            applyBoardData(data); setSeen(boardId, current.cards.length); renderBoard();
           }).catch(function(){});
         }
       }).catch(function(){});
@@ -756,6 +841,13 @@ var App = (function(){
   function stopPolling(){ if(pollTimer){ clearInterval(pollTimer); pollTimer=null; } }
 
   // -------- 投稿／編集モーダル（写真・動画・カメラ） --------
+  var TEMPLATES=['わかったこと','むずかしかったこと','次にがんばりたいこと','気づいたこと','友だちのいいところ'];
+  function insertTemplate(label){
+    var t=$('mText'); if(!t)return;
+    var line='■'+label+'：\n';
+    t.value=(t.value && !/\n$/.test(t.value)) ? (t.value+'\n'+line) : (t.value+line);
+    t.focus(); t.selectionStart=t.selectionEnd=t.value.length;
+  }
   var mode='post';            // 'post' | 'edit'
   var postSectionId='';       // 投稿先セクション
   var editTarget=null;        // 編集対象カード
@@ -780,14 +872,11 @@ var App = (function(){
     var html=heading
       +'<label class="field"><span>タイトル（任意・太字で表示）</span><input id="mTitle" type="text" placeholder="タイトル" value="'+esc(titleVal)+'"></label>'
       +'<label class="field"><span>本文</span><textarea id="mText" rows="4" placeholder="本文を入力（タイトルだけ・写真だけでもOK）">'+esc(textVal)+'</textarea></label>'
+      +'<div class="tmpl-row">'+TEMPLATES.map(function(t){return '<button type="button" onclick="App.insertTemplate('+JSON.stringify(t).replace(/"/g,'&quot;')+')">＋ '+esc(t)+'</button>';}).join('')+'</div>'
       +'<label class="field"><span>写真・動画・PDF（任意）</span><input type="file" id="mFile" accept="image/*,video/*,application/pdf,.pdf"></label>'
       +'<div style="margin:-6px 0 12px;display:flex;gap:8px;flex-wrap:wrap">'
-      +'<button type="button" class="ghost-btn" onclick="App.capture(\'image\')">📷 写真を撮る</button>'
-      +'<button type="button" class="ghost-btn" onclick="App.capture(\'video\')">🎥 動画を撮る</button>'
+      +'<button type="button" class="ghost-btn" onclick="App.openCamera()">📷 カメラで撮影（写真・動画）</button>'
       +'</div>'
-      // 端末標準のカメラを直接起動（capture属性）。GASのiframe内でも動くため getUserMedia より確実。
-      +'<input type="file" id="mCapImg" accept="image/*" capture="environment" class="hidden">'
-      +'<input type="file" id="mCapVid" accept="video/*" capture="environment" class="hidden">'
       +'<div id="mPrev" style="margin-bottom:12px"></div>'
       +(mode==='edit'?'<div id="mRemoveWrap" style="margin-bottom:12px"></div>':'')
       +'<div class="color-row" id="cRow"></div>'
@@ -798,15 +887,47 @@ var App = (function(){
     row.innerHTML=COLORS.map(function(c){return '<div class="swatch'+(c===pickedColor?' active':'')+'" style="background:'+c+';'+(c==='#ffffff'?'border:1px solid #ddd':'')+'" data-c="'+c+'"></div>';}).join('');
     [].forEach.call(row.children,function(sw){sw.addEventListener('click',function(){pickedColor=sw.dataset.c;[].forEach.call(row.children,function(x){x.classList.remove('active');});sw.classList.add('active');});});
     $('mFile').addEventListener('change',onFile);
-    $('mCapImg').addEventListener('change',onFile);
-    $('mCapVid').addEventListener('change',onFile);
     renderMediaPreview();
   }
 
-  // 端末のカメラで撮影（写真／動画）。capture属性付きファイル入力を起動するだけ。
-  function capture(kind){
-    var el=$(kind==='video'?'mCapVid':'mCapImg');
-    if(el){ el.value=''; el.click(); }
+  // -------- アプリ内カメラ（別ウィンドウで起動：GASのサンドボックス外なのでPCでも動く） --------
+  // popup から撮影結果を受け取る
+  function onCapture(media){
+    if(!media||!media.data){return;}
+    pendingMedia={data:media.data,mimeType:media.mimeType,filename:media.filename,kind:media.kind,previewUrl:media.dataUrl};
+    removeExisting=false; renderMediaPreview();
+    toast((media.kind==='video'?'動画':'写真')+'を取り込みました');
+  }
+  function openCamera(){
+    var w=window.open('','manabaseCam','width=760,height=700');
+    if(!w){ toast('カメラ用のウィンドウを開けませんでした。ポップアップを許可してください'); return; }
+    var doc=
+      '<!DOCTYPE html><html lang="ja"><head><meta charset="utf-8">'
+      +'<meta name="viewport" content="width=device-width,initial-scale=1"><title>カメラ</title>'
+      +'<style>body{margin:0;background:#111;color:#fff;font-family:sans-serif;text-align:center}'
+      +'video{width:100%;max-height:72vh;background:#000;display:block}'
+      +'#bar{display:flex;gap:8px;justify-content:center;flex-wrap:wrap;padding:12px}'
+      +'button{font-size:15px;padding:10px 16px;border:none;border-radius:10px;cursor:pointer}'
+      +'.p{background:#ff5a5f;color:#fff}.g{background:#444;color:#fff}'
+      +'#msg{min-height:20px;font-size:13px;color:#ffd}</style></head><body>'
+      +'<video id="v" autoplay playsinline muted></video>'
+      +'<div id="msg">カメラを準備中…</div>'
+      +'<div id="bar"><button class="g" onclick="flip()">🔄 切替</button>'
+      +'<button class="p" onclick="snap()">📷 写真</button>'
+      +'<button class="g" id="rec" onclick="toggleRec()">⏺ 録画</button>'
+      +'<button class="g" onclick="window.close()">閉じる</button></div>'
+      +'<script>'
+      +'var stream=null,rec=null,chunks=[],facing="user",recording=false;'
+      +'function $(i){return document.getElementById(i);}'
+      +'function start(){stop();navigator.mediaDevices.getUserMedia({video:{facingMode:facing},audio:true}).then(function(s){stream=s;$("v").srcObject=s;$("msg").textContent="撮影できます";}).catch(function(e){$("msg").textContent="カメラを起動できません: "+(e.message||e);});}'
+      +'function stop(){if(stream){stream.getTracks().forEach(function(t){t.stop();});stream=null;}}'
+      +'function flip(){facing=(facing==="user")?"environment":"user";start();}'
+      +'function snap(){var v=$("v");if(!v.videoWidth){return;}var m=1280,w=v.videoWidth,h=v.videoHeight;if(w>h&&w>m){h=Math.round(h*m/w);w=m;}else if(h>=w&&h>m){w=Math.round(w*m/h);h=m;}var c=document.createElement("canvas");c.width=w;c.height=h;c.getContext("2d").drawImage(v,0,0,w,h);var u=c.toDataURL("image/jpeg",0.85);send({data:u.split(",")[1],mimeType:"image/jpeg",filename:"camera_"+Date.now()+".jpg",kind:"image",dataUrl:u});}'
+      +'function toggleRec(){if(!stream)return;if(!recording){chunks=[];var o={};try{if(MediaRecorder.isTypeSupported("video/webm;codecs=vp9"))o={mimeType:"video/webm;codecs=vp9"};else if(MediaRecorder.isTypeSupported("video/webm"))o={mimeType:"video/webm"};}catch(e){}try{rec=new MediaRecorder(stream,o);}catch(e){$("msg").textContent="録画を開始できません";return;}rec.ondataavailable=function(ev){if(ev.data&&ev.data.size)chunks.push(ev.data);};rec.onstop=function(){var b=new Blob(chunks,{type:rec.mimeType||"video/webm"});if(b.size>20*1048576){$("msg").textContent="動画が長すぎます（20MBまで）";return;}var fr=new FileReader();fr.onload=function(ev){var u=ev.target.result;send({data:u.split(",")[1],mimeType:b.type,filename:"camera_"+Date.now()+".webm",kind:"video",dataUrl:u});};fr.readAsDataURL(b);};rec.start();recording=true;$("rec").textContent="■ 停止";$("msg").innerHTML="● 録画中…";}else{recording=false;try{rec.stop();}catch(e){}}}'
+      +'function send(media){try{window.opener.App.onCapture(media);}catch(e){alert("本体に渡せませんでした");return;}stop();window.close();}'
+      +'window.addEventListener("beforeunload",stop);start();'
+      +'<\/script></body></html>';
+    w.document.open(); w.document.write(doc); w.document.close();
   }
 
   function onFile(e){
@@ -899,7 +1020,9 @@ var App = (function(){
     boardList:boardList, openBoard:openBoard, refreshBoard:refreshBoard, leaveBoard:leaveBoard,
     openPost:openPost, openEdit:openEdit, submitMedia:submitMedia, clearMedia:clearMedia,
     addSection:addSection, setSort:setSort,
-    capture:capture,
+    onSearch:onSearch, toggleMine:toggleMine, toggleMedia:toggleMedia,
+    insertTemplate:insertTemplate,
+    openCamera:openCamera, onCapture:onCapture,
     closeModal:closeModal,
     // 共有
     _:{run:run,esc:esc,toast:toast,spinner:spinner,view:view,setCrumb:setCrumb,err:err,modal:modal,closeModal:closeModal,fmt:fmt,
