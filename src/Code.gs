@@ -15,7 +15,7 @@ var PROP_SCHEMA_VERSION = 'SCHEMA_VERSION';
 var SCHEMA_VERSION = '8';
 // クライアント(Index.html)の APP_BUILD と必ず一致させること。
 // デプロイ更新忘れ（古いコードが動いている状態）を検知するために使う。
-var APP_BUILD = '9';
+var APP_BUILD = '10';
 
 var SHEET_STUDENTS = 'Students';
 var SHEET_BOARDS = 'Boards';
@@ -243,15 +243,7 @@ function getLoginInfo() {
 
 /** デプロイ状態の診断用。クライアントの APP_BUILD と一致していれば最新。 */
 function getServerInfo() {
-  // 外部リクエスト権限（UrlFetchApp）が使えるか実際に試す
-  var urlFetch = false, urlFetchError = '';
-  try {
-    UrlFetchApp.fetch('https://www.google.com/generate_204', { muteHttpExceptions: true, followRedirects: false });
-    urlFetch = true;
-  } catch (e) {
-    urlFetchError = String((e && e.message) || e);
-  }
-  return { build: APP_BUILD, schema: SCHEMA_VERSION, urlFetch: urlFetch, urlFetchError: urlFetchError };
+  return { build: APP_BUILD, schema: SCHEMA_VERSION };
 }
 
 /** 生徒ログイン。初回（パスワード未設定）はここで設定します。 */
@@ -718,6 +710,7 @@ function sanitizeLink_(link) {
     url: url,
     title: String(s.title || '').slice(0, 300),
     image: String(s.image || '').slice(0, 1000),
+    favicon: String(s.favicon || '').slice(0, 1000),
     desc: String(s.desc || '').slice(0, 500),
     site: String(s.site || hostOf_(url)).slice(0, 200)
   };
@@ -894,38 +887,8 @@ function addComment(reflectionId, author, password, text) {
     .map(function (c) { return { commentId: c.commentId, author: c.author, text: c.text, createdAt: toMs_(c.createdAt) }; });
 }
 
-// ============================ リンクプレビュー（OGP） ============================
-
-/**
- * URL を読み込み、OGP/メタ情報からプレビュー（タイトル・画像・説明）を作る。
- * クライアントの「プレビュー取得」および投稿保存時に使う。失敗しても URL だけは返す。
- */
-function fetchLinkPreview(url) {
-  url = normalizeUrl_(url);
-  if (!url) throw new Error('URL を入力してください。');
-  var info = { url: url, title: '', image: '', desc: '', site: hostOf_(url) };
-  try {
-    var res = UrlFetchApp.fetch(url, {
-      muteHttpExceptions: true,
-      followRedirects: true,
-      validateHttpsCertificates: true,
-      headers: { 'User-Agent': 'Mozilla/5.0 (compatible; ManabaseBot/1.0)' }
-    });
-    if (res.getResponseCode() >= 400) return info;
-    var ct = String(res.getHeaders()['Content-Type'] || res.getHeaders()['content-type'] || '');
-    if (ct && ct.indexOf('text/html') < 0 && ct.indexOf('application/xhtml') < 0) return info;
-    var html = res.getContentText();
-    // 先頭の <head> 付近だけ見れば十分（重い解析を避ける）
-    html = html.slice(0, 200000);
-    info.title = metaContent_(html, 'og:title') || titleTag_(html) || '';
-    info.image = absUrl_(url, metaContent_(html, 'og:image') || metaContent_(html, 'twitter:image') || '');
-    info.desc = metaContent_(html, 'og:description') || metaName_(html, 'description') || '';
-    if (!info.title) info.title = info.site;
-  } catch (e) {
-    // ネットワークエラー等は URL だけのプレビューにフォールバック
-  }
-  return info;
-}
+// ============================ リンク（プレビューはクライアント側で生成） ============================
+// ※ 外部リクエスト権限(UrlFetchApp)を使わない方針。プレビュー情報はクライアントが作って渡す。
 
 function normalizeUrl_(url) {
   url = String(url || '').trim();
@@ -937,37 +900,6 @@ function normalizeUrl_(url) {
 function hostOf_(url) {
   var m = String(url).match(/^https?:\/\/([^\/?#]+)/i);
   return m ? m[1].replace(/^www\./, '') : '';
-}
-function metaContent_(html, prop) {
-  // <meta property="og:xxx" content="..."> （property/name どちらでも、属性順も両対応）
-  var re = new RegExp('<meta[^>]+(?:property|name)\\s*=\\s*["\']' + escRe_(prop) + '["\'][^>]*>', 'i');
-  var tag = html.match(re);
-  if (!tag) return '';
-  var c = tag[0].match(/content\s*=\s*["\']([\s\S]*?)["\']/i);
-  return c ? decodeEntities_(c[1].trim()) : '';
-}
-function metaName_(html, name) { return metaContent_(html, name); }
-function titleTag_(html) {
-  var m = html.match(/<title[^>]*>([\s\S]*?)<\/title>/i);
-  return m ? decodeEntities_(m[1].trim()) : '';
-}
-function absUrl_(base, u) {
-  u = String(u || '').trim();
-  if (!u) return '';
-  if (/^https?:\/\//i.test(u)) return u;
-  if (/^\/\//.test(u)) return 'https:' + u;
-  var m = base.match(/^(https?:\/\/[^\/]+)(\/[^?#]*)?/i);
-  if (!m) return u;
-  if (u.charAt(0) === '/') return m[1] + u;
-  var dir = (m[2] || '/').replace(/[^\/]*$/, '');
-  return m[1] + dir + u;
-}
-function escRe_(s) { return String(s).replace(/[.*+?^${}()|[\]\\]/g, '\\$&'); }
-function decodeEntities_(s) {
-  return String(s)
-    .replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>')
-    .replace(/&quot;/g, '"').replace(/&#39;/g, "'").replace(/&#x27;/gi, "'")
-    .replace(/&nbsp;/g, ' ');
 }
 
 // ============================ メディア（写真・動画） ============================

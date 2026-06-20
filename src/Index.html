@@ -146,6 +146,8 @@
     .link-prev:hover{box-shadow:0 2px 12px rgba(0,0,0,.14)}
     .link-prev .lp-img{width:100%;height:140px;object-fit:cover;display:block;background:#eee}
     .link-prev .lp-body{padding:8px 10px}
+    .link-prev .lp-row{display:flex;align-items:center;gap:8px}
+    .link-prev .lp-fav{width:28px;height:28px;border-radius:6px;flex:0 0 auto;background:#f3eee6}
     .link-prev .lp-title{font-weight:700;font-size:14px;line-height:1.35;
       display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
     .link-prev .lp-desc{color:#555;font-size:12px;margin-top:3px;
@@ -255,7 +257,7 @@
 // ============================================================
 var App = (function(){
   // サーバー(Code.gs)の APP_BUILD と必ず一致させること。ズレていれば「デプロイ未更新」を警告する。
-  var APP_BUILD = '9';
+  var APP_BUILD = '10';
   var COLORS = ['#fff7c0','#ffd1dc','#c8f0d0','#cfe3ff','#e8d6ff','#ffe2bf','#ffffff'];
   // セクションの色分け用パレット（先生が選ぶ）
   var SECTION_COLORS = ['#e8554e','#e08a3c','#d9a400','#2faf6b','#2796a8','#3f7fd6','#8c5bd0','#d24b8c','#7a8b3c','#6a7a8c'];
@@ -930,17 +932,34 @@ var App = (function(){
     renderLinkPreview();
   }
 
-  // -------- リンクプレビュー（OGP） --------
+  // -------- リンクプレビュー（ブラウザ側だけで生成・権限不要） --------
+  function normalizeUrlC(u){
+    u=String(u||'').trim(); if(!u)return '';
+    if(!/^https?:\/\//i.test(u)) u='https://'+u;
+    if(!/^https?:\/\/[^\s]+\.[^\s]+/i.test(u)) return '';
+    return u;
+  }
+  function hostC(u){ var m=String(u).match(/^https?:\/\/([^\/?#]+)/i); return m?m[1].replace(/^www\./,''):''; }
+  function youtubeId(u){
+    var m=String(u).match(/(?:youtube\.com\/(?:watch\?v=|live\/|embed\/|shorts\/)|youtu\.be\/)([A-Za-z0-9_-]{6,})/i);
+    return m?m[1]:'';
+  }
+  function buildLinkLocal(url){
+    url=normalizeUrlC(url); if(!url)return null;
+    var host=hostC(url), img='';
+    var yt=youtubeId(url); if(yt) img='https://img.youtube.com/vi/'+yt+'/hqdefault.jpg';
+    return { url:url, title:host, site:host, image:img,
+      favicon:'https://www.google.com/s2/favicons?sz=128&domain='+encodeURIComponent(host) };
+  }
   function previewLink(){
     var inp=$('mLink'); if(!inp)return;
     var url=inp.value.trim();
     if(!url){ pendingLink=null; removeLink=true; renderLinkPreview(); return; }
-    var box=$('mLinkPrev'); if(box) box.innerHTML='<div style="color:var(--muted);font-size:13px">読み込み中…</div>';
-    run('fetchLinkPreview',url).then(function(lk){
-      pendingLink=lk; removeLink=false;
-      if($('mLink')) $('mLink').value=lk.url;
-      renderLinkPreview();
-    }).catch(function(e){ if($('mLinkPrev'))$('mLinkPrev').innerHTML=''; err(e); });
+    var lk=buildLinkLocal(url);
+    if(!lk){ toast('URLの形式が正しくありません'); return; }
+    pendingLink=lk; removeLink=false;
+    if($('mLink')) $('mLink').value=lk.url;
+    renderLinkPreview();
   }
   function clearLink(){ pendingLink=null; removeLink=true; if($('mLink'))$('mLink').value=''; renderLinkPreview(); }
   function renderLinkPreview(){
@@ -952,12 +971,14 @@ var App = (function(){
   }
   function linkCardHtml(lk){
     if(!lk||!lk.url)return '';
-    var img=lk.image?'<img class="lp-img" src="'+esc(lk.image)+'" referrerpolicy="no-referrer" loading="lazy" onerror="this.style.display=\'none\'">':'';
+    var big=lk.image?'<img class="lp-img" src="'+esc(lk.image)+'" referrerpolicy="no-referrer" loading="lazy" onerror="this.style.display=\'none\'">':'';
+    var fav=lk.favicon?'<img class="lp-fav" src="'+esc(lk.favicon)+'" referrerpolicy="no-referrer" onerror="this.style.display=\'none\'">':'';
     return '<a class="link-prev" href="'+esc(lk.url)+'" target="_blank" rel="noopener">'
-      +img
-      +'<div class="lp-body"><div class="lp-title">'+esc(lk.title||lk.url)+'</div>'
+      +big
+      +'<div class="lp-body lp-row">'+fav
+      +'<div><div class="lp-title">'+esc(lk.title||lk.url)+'</div>'
       +(lk.desc?'<div class="lp-desc">'+esc(lk.desc)+'</div>':'')
-      +'<div class="lp-site">🔗 '+esc(lk.site||'')+'</div></div></a>';
+      +'<div class="lp-site">🔗 '+esc(lk.site||'開く')+'</div></div></div></a>';
   }
 
   // -------- アプリ内カメラ（別ウィンドウで起動：GASのサンドボックス外なのでPCでも動く） --------
@@ -1162,14 +1183,10 @@ var Teacher=(function(){
   function loadSysInfo(){
     U.run('getServerInfo').then(function(s){
       var ok=(s.build===U.appBuild());
-      var lines=[];
-      lines.push((ok?'✅':'⚠️')+' デプロイ：'+(ok?'最新です':'<b style="color:#c0392b">古いです（デプロイのバージョン更新が必要）</b>')
-        +'（画面 '+U.appBuild()+' / サーバー '+U.esc(s.build||'不明')+'）');
-      lines.push((s.urlFetch?'✅':'⚠️')+' リンクの読み込み権限：'+(s.urlFetch?'有効です'
-        :'<b style="color:#c0392b">無効</b>（appsscript.json に外部リクエスト権限が必要。setup実行で再承認）')
-        +(s.urlFetchError?'<br><span style="color:var(--muted);font-size:12px">'+U.esc(s.urlFetchError)+'</span>':''));
+      var line=(ok?'✅':'⚠️')+' デプロイ：'+(ok?'最新です':'<b style="color:#c0392b">古いです（デプロイのバージョン更新が必要）</b>')
+        +'（画面 '+U.appBuild()+' / サーバー '+U.esc(s.build||'不明')+'）';
       var box=document.getElementById('sysInfo');
-      if(box) box.innerHTML='<div style="line-height:2">'+lines.join('<br>')+'</div>';
+      if(box) box.innerHTML='<div style="line-height:2">'+line+'</div>';
     }).catch(function(e){
       var box=document.getElementById('sysInfo');
       if(box) box.innerHTML='<span style="color:#c0392b">確認できませんでした：'+U.esc((e&&e.message)||e)+'</span>';
