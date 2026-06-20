@@ -289,7 +289,7 @@ var App = (function(){
   function setCrumb(t){ $('crumb').textContent = t ? '/ '+t : ''; }
   function toast(m){var t=$('toast');t.textContent=m;t.classList.remove('hidden');clearTimeout(t._t);t._t=setTimeout(function(){t.classList.add('hidden');},2600);}
   function fmt(d){if(d==null||d==='')return '';var x=new Date(d);if(isNaN(x))return '';return (x.getMonth()+1)+'/'+x.getDate()+' '+('0'+x.getHours()).slice(-2)+':'+('0'+x.getMinutes()).slice(-2);}
-  function run(fn){var a=[].slice.call(arguments,1);return new Promise(function(res,rej){var r=google.script.run.withSuccessHandler(res).withFailureHandler(rej);r[fn].apply(r,a);});}
+  function run(fn){var a=[].slice.call(arguments,1);return new Promise(function(res,rej){var r=google.script.run.withSuccessHandler(res).withFailureHandler(rej);if(typeof r[fn]!=='function'){rej(new Error('サーバー機能「'+fn+'」が見つかりません。最新のコードを保存し、ウェブアプリのデプロイ（バージョン）を更新してください。'));return;}r[fn].apply(r,a);});}
   function errMsg(e){return (e&&e.message)?e.message:(e==null?'不明なエラー':String(e));}
   function err(e){
     console.error(e);
