@@ -96,7 +96,7 @@
     /* 固定ヘッダー（＋ボタンが上、その下にタイトル） */
     .col-header{flex:0 0 auto;padding:10px 12px 8px;background:rgba(255,255,255,.75);border-bottom:1px solid var(--border)}
     .add-bar{display:block;width:100%;border:1px dashed var(--accent2);background:#fff;color:var(--accent2);
-      border-radius:10px;padding:7px;font-size:16px;font-weight:700;cursor:pointer;margin-bottom:8px}
+      border-radius:10px;padding:7px;font-size:16px;font-weight:700;cursor:pointer;margin-top:8px}
     .add-bar:hover{background:var(--accent2);color:#fff}
     .col-title{display:flex;align-items:center;justify-content:space-between;gap:6px}
     .col-title .sec-name{font-weight:700;font-size:16px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
@@ -121,12 +121,17 @@
     .card .body{font-size:15px;white-space:pre-wrap;word-break:break-word;line-height:1.6}
     .card img.photo{width:100%;border-radius:10px;margin-top:8px;display:block}
     .card .time{color:rgba(0,0,0,.40);font-size:11px;margin-top:6px}
-    /* 右上のアイコン操作（小さく） */
-    .card .tools{position:absolute;top:8px;right:8px;display:flex;gap:2px}
-    .card .tools button{background:rgba(255,255,255,.65);border:none;border-radius:7px;cursor:pointer;
-      font-size:13px;line-height:1;padding:3px 5px;opacity:.55}
-    .card .tools button:hover{opacity:1}
-    .card .tools button.on{opacity:1}
+    /* 右上の⋮メニュー */
+    .card .tools{position:absolute;top:6px;right:6px}
+    .card .tools .t-menu{background:rgba(255,255,255,.6);border:none;border-radius:7px;cursor:pointer;
+      font-size:17px;line-height:1;padding:2px 7px;opacity:.55;color:#444}
+    .card .tools .t-menu:hover{opacity:1}
+    .card .menu{position:absolute;right:0;top:28px;background:#fff;border:1px solid var(--border);
+      border-radius:10px;box-shadow:0 8px 22px rgba(0,0,0,.18);z-index:20;min-width:140px;overflow:hidden}
+    .card .menu button{display:block;width:100%;text-align:left;background:#fff;border:none;
+      padding:9px 12px;font-size:14px;cursor:pointer}
+    .card .menu button:hover{background:#f3eee6}
+    .card .menu button.danger{color:var(--accent)}
     .card-actions{display:flex;gap:12px;margin-top:8px;font-size:14px;align-items:center}
     .card-actions .act{cursor:pointer;user-select:none;background:rgba(255,255,255,.5);border:none;border-radius:8px;padding:3px 8px}
     .card-actions .act.liked{color:var(--accent);font-weight:700}
@@ -437,9 +442,9 @@ var App = (function(){
         +'<button title="削除" data-act="del">🗑</button></span>';
     }
     var addBtn = (!sec._none && user) ? '<button class="add-bar" data-act="add">＋ 投稿</button>' : '';
-    head.innerHTML=addBtn
-      +'<div class="col-title"><span class="sec-name">'+esc(sec.name)
-      +'<span class="count">'+cards.length+'</span></span>'+tools+'</div>';
+    head.innerHTML='<div class="col-title"><span class="sec-name">'+esc(sec.name)
+      +'<span class="count">'+cards.length+'</span></span>'+tools+'</div>'
+      +addBtn;
     colEl.appendChild(head);
     if(addBtn) head.querySelector('[data-act="add"]').addEventListener('click',function(){ openPost(sec.sectionId); });
     if(isTeacher && !sec._none){
@@ -466,12 +471,14 @@ var App = (function(){
       if(r.mediaType==='video') media='<iframe class="vid" src="'+esc(r.photoUrl)+'" allow="autoplay" allowfullscreen></iframe>';
       else media='<img class="photo" src="'+esc(r.photoUrl)+'" loading="lazy" referrerpolicy="no-referrer">';
     }
-    // 右上のアイコン操作（ピン📌・編集✏・削除🗑 ＝アイコンのみ・小さく）
+    // 右上の⋮メニュー（ピン留め・編集・削除）
     var tools=canEdit
-      ? '<div class="tools">'
-        +'<button class="t-pin'+(r.pinned?' on':'')+'" title="'+(r.pinned?'ピン解除':'ピン留め')+'">📌</button>'
-        +'<button class="t-edit" title="編集">✏️</button>'
-        +'<button class="t-del" title="削除">🗑️</button></div>'
+      ? '<div class="tools"><button class="t-menu" title="メニュー">⋮</button>'
+        +'<div class="menu hidden">'
+        +'<button class="m-pin">'+(r.pinned?'📌 ピン留めを解除':'📌 ピン留め')+'</button>'
+        +'<button class="m-edit">✏️ 編集</button>'
+        +'<button class="m-del danger">🗑️ 削除</button>'
+        +'</div></div>'
       : '';
     var html=tools
       +(r.pinned?'<div class="pin-strip">📌 ピン留め</div>':'')
@@ -488,9 +495,16 @@ var App = (function(){
 
     d.querySelector('.like').addEventListener('click',function(e){e.stopPropagation();like(r,d);});
     if(canEdit){
-      d.querySelector('.t-pin').addEventListener('click',function(e){e.stopPropagation();togglePinCard(r);});
-      d.querySelector('.t-edit').addEventListener('click',function(e){e.stopPropagation();openEdit(r);});
-      d.querySelector('.t-del').addEventListener('click',function(e){e.stopPropagation();delCard(r);});
+      var menu=d.querySelector('.menu');
+      d.querySelector('.t-menu').addEventListener('click',function(e){
+        e.stopPropagation();
+        var willOpen=menu.classList.contains('hidden');
+        closeAllMenus();
+        if(willOpen) menu.classList.remove('hidden');
+      });
+      d.querySelector('.m-pin').addEventListener('click',function(e){e.stopPropagation();closeAllMenus();togglePinCard(r);});
+      d.querySelector('.m-edit').addEventListener('click',function(e){e.stopPropagation();closeAllMenus();openEdit(r);});
+      d.querySelector('.m-del').addEventListener('click',function(e){e.stopPropagation();closeAllMenus();delCard(r);});
     }
     renderComments(r,d); // コメントは常時表示
     return d;
@@ -498,6 +512,8 @@ var App = (function(){
 
   function findCard(id){ for(var i=0;i<current.cards.length;i++){ if(current.cards[i].reflectionId===id) return current.cards[i]; } return null; }
   function cardNode(id){ return document.querySelector('.card[data-id="'+id+'"]'); }
+  function closeAllMenus(){ [].forEach.call(document.querySelectorAll('.card .menu'),function(m){m.classList.add('hidden');}); }
+  document.addEventListener('click',closeAllMenus);
   function insertCardDom(card){
     var board=$('board'); if(!board){ refreshBoard(); return; }
     var list=board.querySelector('.card-list[data-section-id="'+(card.sectionId||'')+'"]');
