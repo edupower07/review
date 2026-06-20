@@ -1,5 +1,5 @@
 /**
- * 振り返りボード（Padlet風アプリ） - サーバー（Google Apps Script）
+ * Manabase（Padlet風 振り返りボードアプリ） - サーバー（Google Apps Script）
  *
  * 外部APIは一切使いません。組み込みの SpreadsheetApp / DriveApp のみで動作します。
  * 1デプロイ＝1クラス。シートと写真フォルダは初回アクセス時に自動作成されます。
@@ -28,7 +28,7 @@ SHEET_DEFS[SHEET_LIKES] = ['reflectionId', 'studentName', 'createdAt'];
 function doGet() {
   ensureInit_();
   return HtmlService.createHtmlOutputFromFile('Index')
-    .setTitle('振り返りボード')
+    .setTitle('Manabase')
     .addMetaTag('viewport', 'width=device-width, initial-scale=1')
     .setXFrameOptionsMode(HtmlService.XFrameOptionsMode.ALLOWALL);
 }
@@ -57,11 +57,11 @@ function ensureInit_() {
     try {
       ss = openStoredSpreadsheet_(props); // ロック取得後に再確認（ダブルチェック）
       if (!ss) {
-        ss = SpreadsheetApp.create('振り返りボード データ');
+        ss = SpreadsheetApp.create('Manabase データ');
         props.setProperty(PROP_SPREADSHEET_ID, ss.getId());
       }
       if (!props.getProperty(PROP_FOLDER_ID)) {
-        var folder0 = DriveApp.createFolder('振り返りボード 写真');
+        var folder0 = DriveApp.createFolder('Manabase 写真');
         props.setProperty(PROP_FOLDER_ID, folder0.getId());
       }
     } finally {
@@ -109,7 +109,7 @@ function ensureInit_() {
   });
 
   if (!props.getProperty(PROP_FOLDER_ID)) {
-    var folder = DriveApp.createFolder('振り返りボード 写真');
+    var folder = DriveApp.createFolder('Manabase 写真');
     props.setProperty(PROP_FOLDER_ID, folder.getId());
   }
   _ssCache = ss;
