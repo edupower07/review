@@ -11,7 +11,7 @@ var PROP_TEACHER_HASH = 'TEACHER_HASH';
 var PROP_TEACHER_SALT = 'TEACHER_SALT';
 var PROP_SCHEMA_VERSION = 'SCHEMA_VERSION';
 // SHEET_DEFS を変更したら必ずこの版数を上げる（次回アクセス時に1回だけ移行が走る）
-var SCHEMA_VERSION = '7';
+var SCHEMA_VERSION = '8';
 
 var SHEET_STUDENTS = 'Students';
 var SHEET_BOARDS = 'Boards';
@@ -26,8 +26,9 @@ SHEET_DEFS[SHEET_STUDENTS] = ['number', 'name', 'salt', 'passwordHash', 'created
 SHEET_DEFS[SHEET_BOARDS] = ['boardId', 'subject', 'unit', 'date', 'title', 'createdAt', 'archived'];
 // 末尾の color は後から追加した列（セクションの色分け用）
 SHEET_DEFS[SHEET_SECTIONS] = ['sectionId', 'boardId', 'name', 'sortOrder', 'createdAt', 'color'];
-// 末尾の sectionId / mediaType / updatedAt / pinned / title は後から追加した列（既存データは移行で保持）
-SHEET_DEFS[SHEET_REFLECTIONS] = ['reflectionId', 'boardId', 'studentName', 'text', 'photoUrl', 'photoFileId', 'color', 'sortOrder', 'createdAt', 'sectionId', 'mediaType', 'updatedAt', 'pinned', 'title'];
+// 末尾の sectionId / mediaType / updatedAt / pinned / title / link は後から追加した列（既存データは移行で保持）
+// link はリンクプレビュー情報(JSON文字列) {url,title,image,desc}
+SHEET_DEFS[SHEET_REFLECTIONS] = ['reflectionId', 'boardId', 'studentName', 'text', 'photoUrl', 'photoFileId', 'color', 'sortOrder', 'createdAt', 'sectionId', 'mediaType', 'updatedAt', 'pinned', 'title', 'link'];
 SHEET_DEFS[SHEET_COMMENTS] = ['commentId', 'reflectionId', 'author', 'text', 'createdAt'];
 // 末尾の type は後から追加した列（リアクションの種類。空＝❤）
 SHEET_DEFS[SHEET_LIKES] = ['reflectionId', 'studentName', 'createdAt', 'type'];
@@ -566,6 +567,7 @@ function getBoardData(boardId, currentName) {
       createdAt: toMs_(r.createdAt),
       updatedAt: toMs_(r.updatedAt),
       pinned: r.pinned === true || r.pinned === 'true' || r.pinned === 1,
+      link: parseLink_(r.link),
       likeCount: likeCount[r.reflectionId] || 0,
       reactions: reactByRef[r.reflectionId] || {},
       myReactions: myReactByRef[r.reflectionId] || {},
@@ -608,11 +610,12 @@ function getBoardSignature(boardId) {
 /**
  * 投稿。media は { data(base64), mimeType, filename, kind:'image'|'video' } または null。
  */
-function postReflection(boardId, sectionId, studentName, password, title, text, color, media) {
+function postReflection(boardId, sectionId, studentName, password, title, text, color, media, link) {
   if (!verifyStudent_(studentName, password)) throw new Error('ログイン情報が正しくありません。');
   title = String(title || '').trim();
   text = String(text || '').trim();
-  if (!title && !text && !media) throw new Error('タイトルか本文、写真・動画のいずれかを入力してください。');
+  var linkObj = sanitizeLink_(link);
+  if (!title && !text && !media && !linkObj) throw new Error('タイトル・本文・写真・動画・リンクのいずれかを入力してください。');
   var board = getBoard(boardId);
   if (!board) throw new Error('ボードが見つかりません。');
 
@@ -634,7 +637,8 @@ function postReflection(boardId, sectionId, studentName, password, title, text, 
   var now = new Date();
   // 列順は SHEET_DEFS[SHEET_REFLECTIONS] と一致させること
   getSheet_(SHEET_REFLECTIONS).appendRow([
-    id, boardId, studentName, text, url, fileId, color || '#fff7c0', maxOrder + 1, now, sectionId, mediaType, now, false, title
+    id, boardId, studentName, text, url, fileId, color || '#fff7c0', maxOrder + 1, now, sectionId, mediaType, now, false, title,
+    linkObj ? JSON.stringify(linkObj) : ''
   ]);
   // 速度重視：作成したカード1枚だけを返す（クライアントは部分描画する）
   return {
@@ -642,8 +646,24 @@ function postReflection(boardId, sectionId, studentName, password, title, text, 
       reflectionId: id, sectionId: sectionId, studentName: studentName, title: title, text: text,
       photoUrl: url, mediaType: mediaType, color: color || '#fff7c0', sortOrder: maxOrder + 1,
       createdAt: now.getTime(), updatedAt: now.getTime(), pinned: false,
+      link: linkObj, reactions: {}, myReactions: {},
       likeCount: 0, likedByMe: false, comments: []
     }
+  };
+}
+
+/** クライアントから来たリンク情報を安全なオブジェクトに整形（無効なら null）。 */
+function sanitizeLink_(link) {
+  if (!link) return null;
+  var url = normalizeUrl_(typeof link === 'string' ? link : link.url);
+  if (!url) return null;
+  var s = (typeof link === 'object') ? link : {};
+  return {
+    url: url,
+    title: String(s.title || '').slice(0, 300),
+    image: String(s.image || '').slice(0, 1000),
+    desc: String(s.desc || '').slice(0, 500),
+    site: String(s.site || hostOf_(url)).slice(0, 200)
   };
 }
 
@@ -651,7 +671,7 @@ function postReflection(boardId, sectionId, studentName, password, title, text, 
  * 投稿の編集。本人 または 先生のみ。
  * media を渡せば差し替え、removeMedia=true なら添付を削除、どちらも無ければ本文/色のみ更新。
  */
-function editReflection(reflectionId, studentName, password, teacherPassword, title, text, color, media, removeMedia) {
+function editReflection(reflectionId, studentName, password, teacherPassword, title, text, color, media, removeMedia, link, removeLink) {
   var sheet = getSheet_(SHEET_REFLECTIONS);
   var r = readSheet_(SHEET_REFLECTIONS).filter(function (x) { return x.reflectionId === reflectionId; })[0];
   if (!r) throw new Error('投稿が見つかりません。');
@@ -661,14 +681,20 @@ function editReflection(reflectionId, studentName, password, teacherPassword, ti
   var def = SHEET_DEFS[SHEET_REFLECTIONS];
   title = String(title || '').trim();
   text = String(text || '').trim();
+  var linkObj = sanitizeLink_(link);
 
   // 変更後に添付が残るか（先に検証し、空投稿になるなら何も書き換えない）
   var willHaveMedia = (media && media.data) ? true : (removeMedia ? false : !!r.photoFileId);
-  if (!title && !text && !willHaveMedia) throw new Error('タイトルか本文、写真・動画のいずれかは必要です。');
+  var willHaveLink = linkObj ? true : (removeLink ? false : !!r.link);
+  if (!title && !text && !willHaveMedia && !willHaveLink) throw new Error('タイトル・本文・写真・動画・リンクのいずれかは必要です。');
 
   sheet.getRange(r._row, def.indexOf('title') + 1).setValue(title);
   sheet.getRange(r._row, def.indexOf('text') + 1).setValue(text);
   if (color) sheet.getRange(r._row, def.indexOf('color') + 1).setValue(color);
+
+  var linkCol = def.indexOf('link') + 1;
+  if (linkObj) sheet.getRange(r._row, linkCol).setValue(JSON.stringify(linkObj));
+  else if (removeLink) sheet.getRange(r._row, linkCol).setValue('');
 
   if (media && media.data) {
     if (r.photoFileId) { try { DriveApp.getFileById(r.photoFileId).setTrashed(true); } catch (e) {} }
@@ -689,12 +715,19 @@ function editReflection(reflectionId, studentName, password, teacherPassword, ti
   // 速度重視：変更後の値だけ返す（クライアントは該当カードを差し替える）
   var newUrl = (media && media.data) ? readCell_(sheet, r._row, def, 'photoUrl') : (removeMedia ? '' : r.photoUrl);
   var newType = (media && media.data) ? readCell_(sheet, r._row, def, 'mediaType') : (removeMedia ? '' : (r.mediaType || (r.photoUrl ? 'image' : '')));
+  var newLink = linkObj ? linkObj : (removeLink ? null : parseLink_(r.link));
   return {
     update: {
       reflectionId: reflectionId, title: title, text: text, color: color || r.color,
-      photoUrl: newUrl, mediaType: newType, updatedAt: now.getTime()
+      photoUrl: newUrl, mediaType: newType, link: newLink, updatedAt: now.getTime()
     }
   };
+}
+
+/** セルの link(JSON文字列) を安全にオブジェクト化（無ければ null）。 */
+function parseLink_(v) {
+  if (!v) return null;
+  try { var o = JSON.parse(v); return (o && o.url) ? o : null; } catch (e) { return null; }
 }
 
 function readCell_(sheet, row, def, key) {
@@ -805,6 +838,82 @@ function addComment(reflectionId, author, password, text) {
     .map(function (c) { return { commentId: c.commentId, author: c.author, text: c.text, createdAt: toMs_(c.createdAt) }; });
 }
 
+// ============================ リンクプレビュー（OGP） ============================
+
+/**
+ * URL を読み込み、OGP/メタ情報からプレビュー（タイトル・画像・説明）を作る。
+ * クライアントの「プレビュー取得」および投稿保存時に使う。失敗しても URL だけは返す。
+ */
+function fetchLinkPreview(url) {
+  url = normalizeUrl_(url);
+  if (!url) throw new Error('URL を入力してください。');
+  var info = { url: url, title: '', image: '', desc: '', site: hostOf_(url) };
+  try {
+    var res = UrlFetchApp.fetch(url, {
+      muteHttpExceptions: true,
+      followRedirects: true,
+      validateHttpsCertificates: true,
+      headers: { 'User-Agent': 'Mozilla/5.0 (compatible; ManabaseBot/1.0)' }
+    });
+    if (res.getResponseCode() >= 400) return info;
+    var ct = String(res.getHeaders()['Content-Type'] || res.getHeaders()['content-type'] || '');
+    if (ct && ct.indexOf('text/html') < 0 && ct.indexOf('application/xhtml') < 0) return info;
+    var html = res.getContentText();
+    // 先頭の <head> 付近だけ見れば十分（重い解析を避ける）
+    html = html.slice(0, 200000);
+    info.title = metaContent_(html, 'og:title') || titleTag_(html) || '';
+    info.image = absUrl_(url, metaContent_(html, 'og:image') || metaContent_(html, 'twitter:image') || '');
+    info.desc = metaContent_(html, 'og:description') || metaName_(html, 'description') || '';
+    if (!info.title) info.title = info.site;
+  } catch (e) {
+    // ネットワークエラー等は URL だけのプレビューにフォールバック
+  }
+  return info;
+}
+
+function normalizeUrl_(url) {
+  url = String(url || '').trim();
+  if (!url) return '';
+  if (!/^https?:\/\//i.test(url)) url = 'https://' + url;
+  if (!/^https?:\/\/[^\s]+\.[^\s]+/i.test(url)) return '';
+  return url;
+}
+function hostOf_(url) {
+  var m = String(url).match(/^https?:\/\/([^\/?#]+)/i);
+  return m ? m[1].replace(/^www\./, '') : '';
+}
+function metaContent_(html, prop) {
+  // <meta property="og:xxx" content="..."> （property/name どちらでも、属性順も両対応）
+  var re = new RegExp('<meta[^>]+(?:property|name)\\s*=\\s*["\']' + escRe_(prop) + '["\'][^>]*>', 'i');
+  var tag = html.match(re);
+  if (!tag) return '';
+  var c = tag[0].match(/content\s*=\s*["\']([\s\S]*?)["\']/i);
+  return c ? decodeEntities_(c[1].trim()) : '';
+}
+function metaName_(html, name) { return metaContent_(html, name); }
+function titleTag_(html) {
+  var m = html.match(/<title[^>]*>([\s\S]*?)<\/title>/i);
+  return m ? decodeEntities_(m[1].trim()) : '';
+}
+function absUrl_(base, u) {
+  u = String(u || '').trim();
+  if (!u) return '';
+  if (/^https?:\/\//i.test(u)) return u;
+  if (/^\/\//.test(u)) return 'https:' + u;
+  var m = base.match(/^(https?:\/\/[^\/]+)(\/[^?#]*)?/i);
+  if (!m) return u;
+  if (u.charAt(0) === '/') return m[1] + u;
+  var dir = (m[2] || '/').replace(/[^\/]*$/, '');
+  return m[1] + dir + u;
+}
+function escRe_(s) { return String(s).replace(/[.*+?^${}()|[\]\\]/g, '\\$&'); }
+function decodeEntities_(s) {
+  return String(s)
+    .replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>')
+    .replace(/&quot;/g, '"').replace(/&#39;/g, "'").replace(/&#x27;/gi, "'")
+    .replace(/&nbsp;/g, ' ');
+}
+
 // ============================ メディア（写真・動画） ============================
 
 /** 写真または動画を Drive に保存し、表示用URLと種別を返す。 */
@@ -872,6 +981,7 @@ function exportStudent(studentName) {
         subject: bd.subject || '', unit: bd.unit || '', date: bd.date || '',
         title: r.title || '', text: r.text, photoUrl: r.photoUrl,
         mediaType: r.mediaType || (r.photoUrl ? 'image' : ''),
+        link: parseLink_(r.link),
         color: r.color, createdAt: toMs_(r.createdAt)
       };
     });

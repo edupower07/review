@@ -140,6 +140,17 @@
     .card .media-box.pdfbox{background:#fbeaea;color:#c0392b}
     .card .media-box.pdfbox:hover{background:#f6dcdc}
     .card .media-box .ic{font-size:30px;display:block;margin-bottom:6px}
+    /* リンクプレビュー（カードと作成画面で共用） */
+    .link-prev{display:block;margin-top:8px;border:1px solid var(--border);border-radius:10px;overflow:hidden;
+      text-decoration:none;color:inherit;background:#fff}
+    .link-prev:hover{box-shadow:0 2px 12px rgba(0,0,0,.14)}
+    .link-prev .lp-img{width:100%;height:140px;object-fit:cover;display:block;background:#eee}
+    .link-prev .lp-body{padding:8px 10px}
+    .link-prev .lp-title{font-weight:700;font-size:14px;line-height:1.35;
+      display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+    .link-prev .lp-desc{color:#555;font-size:12px;margin-top:3px;
+      display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+    .link-prev .lp-site{color:var(--muted);font-size:12px;margin-top:4px}
     .card .time{color:rgba(0,0,0,.40);font-size:11px;margin-top:6px}
     /* 拡大プレビュー（ライトボックス） */
     .lightbox{position:fixed;inset:0;background:rgba(0,0,0,.86);z-index:500;display:flex;
@@ -516,6 +527,7 @@ var App = (function(){
           if(ok && onlyMedia && !r.photoUrl) ok=false;
           if(ok && q){
             var hay=((r.studentName||'')+' '+(r.title||'')+' '+(r.text||'')+' '
+              +(r.link?(r.link.title+' '+r.link.url+' '+r.link.site):'')+' '
               +(r.comments?r.comments.map(function(c){return c.author+' '+c.text;}).join(' '):'')).toLowerCase();
             if(hay.indexOf(q)<0) ok=false;
           }
@@ -602,6 +614,7 @@ var App = (function(){
       +(r.title?'<div class="card-title">'+esc(r.title)+'</div>':'')
       +(r.text?'<div class="body">'+esc(r.text)+'</div>':'')
       +media
+      +linkCardHtml(r.link)
       +'<div class="card-actions">'
       +REACTIONS.map(function(t){
           var cnt=(r.reactions&&r.reactions[t])||0;
@@ -743,7 +756,7 @@ var App = (function(){
   function setupDnD(boardEl){
     boardEl.addEventListener('dragstart',function(e){
       // 入力欄・ボタン・コメント操作中はドラッグを開始しない
-      if(e.target.closest('input,textarea,button,.comments')){ e.preventDefault(); return; }
+      if(e.target.closest('input,textarea,button,a,.comments')){ e.preventDefault(); return; }
       var card=e.target.closest('.card'); if(!card)return;
       dragEl=card; setTimeout(function(){card.classList.add('dragging');},0);
     });
@@ -858,16 +871,20 @@ var App = (function(){
   var pendingMedia=null;      // {data,mimeType,filename,kind,previewUrl}
   var pickedColor=COLORS[0];
   var removeExisting=false;
+  var pendingLink=null;       // {url,title,image,desc,site}
+  var removeLink=false;
 
   function openPost(sectionId){
     if(!user){toast('投稿は生徒ログインが必要です');return;}
     mode='post'; postSectionId=sectionId||''; editTarget=null;
     pendingMedia=null; removeExisting=false; pickedColor=COLORS[0];
+    pendingLink=null; removeLink=false;
     showMediaModal('投稿する','','');
   }
   function openEdit(card){
     mode='edit'; editTarget=card;
     pendingMedia=null; removeExisting=false; pickedColor=card.color||COLORS[0];
+    pendingLink=card.link||null; removeLink=false;
     showMediaModal('保存する',card.title||'',card.text||'');
   }
 
@@ -883,6 +900,11 @@ var App = (function(){
       +'</div>'
       +'<div id="mPrev" style="margin-bottom:12px"></div>'
       +'<div id="mRemoveWrap" style="margin-bottom:12px"></div>'
+      +'<label class="field"><span>リンク（URL・任意）</span>'
+        +'<input id="mLink" type="url" placeholder="https://… を貼り付け" inputmode="url"></label>'
+      +'<div style="margin:-6px 0 12px;display:flex;gap:8px;flex-wrap:wrap">'
+        +'<button type="button" class="ghost-btn" onclick="App.previewLink()">🔗 プレビューを取得</button></div>'
+      +'<div id="mLinkPrev" style="margin-bottom:12px"></div>'
       +'<div class="color-row" id="cRow"></div>'
       +'<div class="modal-actions"><button class="ghost-btn" onclick="App.closeModal()">キャンセル</button>'
       +'<button class="primary-btn" id="mSubmit" onclick="App.submitMedia()">'+okLabel+'</button></div>';
@@ -891,7 +913,39 @@ var App = (function(){
     row.innerHTML=COLORS.map(function(c){return '<div class="swatch'+(c===pickedColor?' active':'')+'" style="background:'+c+';'+(c==='#ffffff'?'border:1px solid #ddd':'')+'" data-c="'+c+'"></div>';}).join('');
     [].forEach.call(row.children,function(sw){sw.addEventListener('click',function(){pickedColor=sw.dataset.c;[].forEach.call(row.children,function(x){x.classList.remove('active');});sw.classList.add('active');});});
     $('mFile').addEventListener('change',onFile);
+    if($('mLink')) $('mLink').value=pendingLink?pendingLink.url:'';
     renderMediaPreview();
+    renderLinkPreview();
+  }
+
+  // -------- リンクプレビュー（OGP） --------
+  function previewLink(){
+    var inp=$('mLink'); if(!inp)return;
+    var url=inp.value.trim();
+    if(!url){ pendingLink=null; removeLink=true; renderLinkPreview(); return; }
+    var box=$('mLinkPrev'); if(box) box.innerHTML='<div style="color:var(--muted);font-size:13px">読み込み中…</div>';
+    run('fetchLinkPreview',url).then(function(lk){
+      pendingLink=lk; removeLink=false;
+      if($('mLink')) $('mLink').value=lk.url;
+      renderLinkPreview();
+    }).catch(function(e){ if($('mLinkPrev'))$('mLinkPrev').innerHTML=''; err(e); });
+  }
+  function clearLink(){ pendingLink=null; removeLink=true; if($('mLink'))$('mLink').value=''; renderLinkPreview(); }
+  function renderLinkPreview(){
+    var box=$('mLinkPrev'); if(!box)return;
+    if(pendingLink&&pendingLink.url){
+      box.innerHTML=linkCardHtml(pendingLink)
+        +'<div style="margin-top:8px"><button type="button" class="ghost-btn danger" onclick="App.clearLink()">🗑 リンクを削除</button></div>';
+    }else{ box.innerHTML=''; }
+  }
+  function linkCardHtml(lk){
+    if(!lk||!lk.url)return '';
+    var img=lk.image?'<img class="lp-img" src="'+esc(lk.image)+'" referrerpolicy="no-referrer" loading="lazy" onerror="this.style.display=\'none\'">':'';
+    return '<a class="link-prev" href="'+esc(lk.url)+'" target="_blank" rel="noopener">'
+      +img
+      +'<div class="lp-body"><div class="lp-title">'+esc(lk.title||lk.url)+'</div>'
+      +(lk.desc?'<div class="lp-desc">'+esc(lk.desc)+'</div>':'')
+      +'<div class="lp-site">🔗 '+esc(lk.site||'')+'</div></div></a>';
   }
 
   // -------- アプリ内カメラ（別ウィンドウで起動：GASのサンドボックス外なのでPCでも動く） --------
@@ -1010,19 +1064,19 @@ var App = (function(){
     var title=$('mTitle')?$('mTitle').value.trim():'';
     var text=$('mText').value.trim();
     var hasMediaAfter = pendingMedia || (mode==='edit'&&editTarget&&editTarget.photoUrl&&!removeExisting);
-    if(!title && !text && !hasMediaAfter){toast('タイトルか本文、写真・動画を入れてください');return;}
+    if(!title && !text && !hasMediaAfter && !pendingLink){toast('タイトル・本文・写真・動画・リンクを入れてください');return;}
     var btn=$('mSubmit'); btn.disabled=true; btn.textContent='送信中…';
     var fail=function(e){err(e);btn.disabled=false;btn.textContent='送信';};
     if(mode==='edit'){
-      run('editReflection',editTarget.reflectionId,user?user.name:null,user?user.password:null,teacherPass,title,text,pickedColor,pendingMedia,removeExisting)
+      run('editReflection',editTarget.reflectionId,user?user.name:null,user?user.password:null,teacherPass,title,text,pickedColor,pendingMedia,removeExisting,pendingLink,removeLink)
         .then(function(res){
           var u=res.update, card=findCard(u.reflectionId);
-          if(card){ card.title=u.title; card.text=u.text; card.color=u.color; card.photoUrl=u.photoUrl; card.mediaType=u.mediaType; card.updatedAt=u.updatedAt; replaceCardDom(card); }
+          if(card){ card.title=u.title; card.text=u.text; card.color=u.color; card.photoUrl=u.photoUrl; card.mediaType=u.mediaType; card.link=u.link; card.updatedAt=u.updatedAt; replaceCardDom(card); }
           else refreshBoard();
           closeModal(); toast('保存しました'); lastSig=computeSig();
         }).catch(fail);
     }else{
-      run('postReflection',current.board.boardId,postSectionId,user.name,user.password,title,text,pickedColor,pendingMedia)
+      run('postReflection',current.board.boardId,postSectionId,user.name,user.password,title,text,pickedColor,pendingMedia,pendingLink)
         .then(function(res){
           var card=res.card; current.cards.push(card); insertCardDom(card);
           closeModal(); toast('投稿しました！'); lastSig=computeSig();
@@ -1035,6 +1089,7 @@ var App = (function(){
     pickName:pickName, doLogin:doLogin, teacherLogin:teacherLogin, doTeacherLogin:doTeacherLogin,
     boardList:boardList, openBoard:openBoard, refreshBoard:refreshBoard, leaveBoard:leaveBoard,
     openPost:openPost, openEdit:openEdit, submitMedia:submitMedia, clearMedia:clearMedia,
+    previewLink:previewLink, clearLink:clearLink,
     addSection:addSection, setSort:setSort,
     onSearch:onSearch, toggleMine:toggleMine, toggleMedia:toggleMedia,
     insertTemplate:insertTemplate,
@@ -1201,7 +1256,7 @@ var Teacher=(function(){
         html+='<div class="print-card"><div class="pmeta">'+U.esc(r.subject)+' ／ '+U.esc(r.unit)+' ／ '+U.esc(r.date)+'</div>'
           +(r.title?'<div style="font-weight:700">'+U.esc(r.title)+'</div>':'')
           +(r.text?'<div>'+U.esc(r.text)+'</div>':'')
-          +printMedia(r)+'</div>';
+          +printMedia(r)+printLink(r)+'</div>';
       });
       doPrint(html);
     }).catch(U.err);
@@ -1212,11 +1267,15 @@ var Teacher=(function(){
     if(c.mediaType==='pdf')   return '<div class="pmeta">📄 PDFの添付あり（画面でご確認ください）</div>';
     return '<img src="'+U.esc(c.photoUrl)+'" referrerpolicy="no-referrer">';
   }
+  function printLink(c){
+    if(!c.link||!c.link.url) return '';
+    return '<div class="pmeta" style="margin-top:4px">🔗 '+U.esc(c.link.title||c.link.url)+'：'+U.esc(c.link.url)+'</div>';
+  }
   function printCard(author,c){
     return '<div class="print-card"><div class="pmeta">'+U.esc(author)+'（❤'+c.likeCount+' / 💬'+c.comments.length+'）</div>'
       +(c.title?'<div style="font-weight:700">'+U.esc(c.title)+'</div>':'')
       +(c.text?'<div>'+U.esc(c.text)+'</div>':'')
-      +printMedia(c)
+      +printMedia(c)+printLink(c)
       +(c.comments.length?'<div class="pmeta" style="margin-top:4px">コメント: '+c.comments.map(function(x){return U.esc(x.author+'「'+x.text+'」');}).join(' / ')+'</div>':'')
       +'</div>';
   }
