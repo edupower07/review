@@ -48,14 +48,25 @@ function ensureInit_() {
   if (_ssCache) return _ssCache;
   var props = PropertiesService.getScriptProperties();
 
-  var ss;
-  var ssId = props.getProperty(PROP_SPREADSHEET_ID);
-  if (ssId) {
-    try { ss = SpreadsheetApp.openById(ssId); } catch (e) { ss = null; }
-  }
+  var ss = openStoredSpreadsheet_(props);
   if (!ss) {
-    ss = SpreadsheetApp.create('振り返りボード データ');
-    props.setProperty(PROP_SPREADSHEET_ID, ss.getId());
+    // 初回アクセスでサーバー処理が同時に複数走ると、各々が「IDが無い」と判断して
+    // それぞれスプレッドシートを新規作成してしまう（＝重複）。排他ロックで防ぐ。
+    var lock = LockService.getScriptLock();
+    try { lock.waitLock(20000); } catch (e) {}
+    try {
+      ss = openStoredSpreadsheet_(props); // ロック取得後に再確認（ダブルチェック）
+      if (!ss) {
+        ss = SpreadsheetApp.create('振り返りボード データ');
+        props.setProperty(PROP_SPREADSHEET_ID, ss.getId());
+      }
+      if (!props.getProperty(PROP_FOLDER_ID)) {
+        var folder0 = DriveApp.createFolder('振り返りボード 写真');
+        props.setProperty(PROP_FOLDER_ID, folder0.getId());
+      }
+    } finally {
+      try { lock.releaseLock(); } catch (e) {}
+    }
   }
 
   // 各シートを保証（ヘッダーが旧版・不一致なら作り直す）
@@ -105,8 +116,27 @@ function ensureInit_() {
   return ss;
 }
 
+/** 記録済みIDからスプレッドシートを開く。無ければ null。 */
+function openStoredSpreadsheet_(props) {
+  var id = props.getProperty(PROP_SPREADSHEET_ID);
+  if (!id) return null;
+  try { return SpreadsheetApp.openById(id); } catch (e) { return null; }
+}
+
 function getSpreadsheet_() {
   return ensureInit_();
+}
+
+/**
+ * 「今アプリが実際に使っているスプレッドシート」を確認する関数。
+ * エディタからこの関数を実行し、ログに出るURLのファイルを残してください。
+ * （同名のもう一方は使われていないので、ゴミ箱に入れて構いません）
+ */
+function getActiveSpreadsheetUrl() {
+  var ss = openStoredSpreadsheet_(PropertiesService.getScriptProperties());
+  var url = ss ? ss.getUrl() : '(まだ作成されていません)';
+  Logger.log('使用中のスプレッドシート: ' + url);
+  return url;
 }
 function getSheet_(name) {
   var sheet = getSpreadsheet_().getSheetByName(name);
