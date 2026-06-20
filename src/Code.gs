@@ -11,7 +11,7 @@ var PROP_TEACHER_HASH = 'TEACHER_HASH';
 var PROP_TEACHER_SALT = 'TEACHER_SALT';
 var PROP_SCHEMA_VERSION = 'SCHEMA_VERSION';
 // SHEET_DEFS を変更したら必ずこの版数を上げる（次回アクセス時に1回だけ移行が走る）
-var SCHEMA_VERSION = '4';
+var SCHEMA_VERSION = '5';
 
 var SHEET_STUDENTS = 'Students';
 var SHEET_BOARDS = 'Boards';
@@ -24,8 +24,8 @@ var SHEET_DEFS = {};
 SHEET_DEFS[SHEET_STUDENTS] = ['number', 'name', 'salt', 'passwordHash', 'createdAt'];
 SHEET_DEFS[SHEET_BOARDS] = ['boardId', 'subject', 'unit', 'date', 'title', 'createdAt'];
 SHEET_DEFS[SHEET_SECTIONS] = ['sectionId', 'boardId', 'name', 'sortOrder', 'createdAt'];
-// 末尾の sectionId / mediaType / updatedAt / pinned は後から追加した列（既存データは移行で保持）
-SHEET_DEFS[SHEET_REFLECTIONS] = ['reflectionId', 'boardId', 'studentName', 'text', 'photoUrl', 'photoFileId', 'color', 'sortOrder', 'createdAt', 'sectionId', 'mediaType', 'updatedAt', 'pinned'];
+// 末尾の sectionId / mediaType / updatedAt / pinned / title は後から追加した列（既存データは移行で保持）
+SHEET_DEFS[SHEET_REFLECTIONS] = ['reflectionId', 'boardId', 'studentName', 'text', 'photoUrl', 'photoFileId', 'color', 'sortOrder', 'createdAt', 'sectionId', 'mediaType', 'updatedAt', 'pinned', 'title'];
 SHEET_DEFS[SHEET_COMMENTS] = ['commentId', 'reflectionId', 'author', 'text', 'createdAt'];
 SHEET_DEFS[SHEET_LIKES] = ['reflectionId', 'studentName', 'createdAt'];
 
@@ -519,6 +519,7 @@ function getBoardData(boardId, currentName) {
       photoUrl: r.photoUrl,
       mediaType: r.mediaType || (r.photoUrl ? 'image' : ''),
       color: r.color,
+      title: r.title || '',
       sortOrder: Number(r.sortOrder) || 0,
       createdAt: toMs_(r.createdAt),
       updatedAt: toMs_(r.updatedAt),
@@ -564,10 +565,11 @@ function getBoardSignature(boardId) {
 /**
  * 投稿。media は { data(base64), mimeType, filename, kind:'image'|'video' } または null。
  */
-function postReflection(boardId, sectionId, studentName, password, text, color, media) {
+function postReflection(boardId, sectionId, studentName, password, title, text, color, media) {
   if (!verifyStudent_(studentName, password)) throw new Error('ログイン情報が正しくありません。');
+  title = String(title || '').trim();
   text = String(text || '').trim();
-  if (!text && !media) throw new Error('テキストか写真・動画を入力してください。');
+  if (!title && !text && !media) throw new Error('タイトルか本文、写真・動画のいずれかを入力してください。');
   var board = getBoard(boardId);
   if (!board) throw new Error('ボードが見つかりません。');
 
@@ -589,12 +591,12 @@ function postReflection(boardId, sectionId, studentName, password, text, color, 
   var now = new Date();
   // 列順は SHEET_DEFS[SHEET_REFLECTIONS] と一致させること
   getSheet_(SHEET_REFLECTIONS).appendRow([
-    id, boardId, studentName, text, url, fileId, color || '#fff7c0', maxOrder + 1, now, sectionId, mediaType, now, false
+    id, boardId, studentName, text, url, fileId, color || '#fff7c0', maxOrder + 1, now, sectionId, mediaType, now, false, title
   ]);
   // 速度重視：作成したカード1枚だけを返す（クライアントは部分描画する）
   return {
     card: {
-      reflectionId: id, sectionId: sectionId, studentName: studentName, text: text,
+      reflectionId: id, sectionId: sectionId, studentName: studentName, title: title, text: text,
       photoUrl: url, mediaType: mediaType, color: color || '#fff7c0', sortOrder: maxOrder + 1,
       createdAt: now.getTime(), updatedAt: now.getTime(), pinned: false,
       likeCount: 0, likedByMe: false, comments: []
@@ -606,7 +608,7 @@ function postReflection(boardId, sectionId, studentName, password, text, color, 
  * 投稿の編集。本人 または 先生のみ。
  * media を渡せば差し替え、removeMedia=true なら添付を削除、どちらも無ければ本文/色のみ更新。
  */
-function editReflection(reflectionId, studentName, password, teacherPassword, text, color, media, removeMedia) {
+function editReflection(reflectionId, studentName, password, teacherPassword, title, text, color, media, removeMedia) {
   var sheet = getSheet_(SHEET_REFLECTIONS);
   var r = readSheet_(SHEET_REFLECTIONS).filter(function (x) { return x.reflectionId === reflectionId; })[0];
   if (!r) throw new Error('投稿が見つかりません。');
@@ -614,12 +616,14 @@ function editReflection(reflectionId, studentName, password, teacherPassword, te
   if (!allowed) throw new Error('編集する権限がありません。');
 
   var def = SHEET_DEFS[SHEET_REFLECTIONS];
+  title = String(title || '').trim();
   text = String(text || '').trim();
 
   // 変更後に添付が残るか（先に検証し、空投稿になるなら何も書き換えない）
   var willHaveMedia = (media && media.data) ? true : (removeMedia ? false : !!r.photoFileId);
-  if (!text && !willHaveMedia) throw new Error('テキストか写真・動画のどちらかは必要です。');
+  if (!title && !text && !willHaveMedia) throw new Error('タイトルか本文、写真・動画のいずれかは必要です。');
 
+  sheet.getRange(r._row, def.indexOf('title') + 1).setValue(title);
   sheet.getRange(r._row, def.indexOf('text') + 1).setValue(text);
   if (color) sheet.getRange(r._row, def.indexOf('color') + 1).setValue(color);
 
@@ -644,7 +648,7 @@ function editReflection(reflectionId, studentName, password, teacherPassword, te
   var newType = (media && media.data) ? readCell_(sheet, r._row, def, 'mediaType') : (removeMedia ? '' : (r.mediaType || (r.photoUrl ? 'image' : '')));
   return {
     update: {
-      reflectionId: reflectionId, text: text, color: color || r.color,
+      reflectionId: reflectionId, title: title, text: text, color: color || r.color,
       photoUrl: newUrl, mediaType: newType, updatedAt: now.getTime()
     }
   };
@@ -793,7 +797,7 @@ function exportStudent(studentName) {
       return {
         boardTitle: bd.title || '(削除済みボード)',
         subject: bd.subject || '', unit: bd.unit || '', date: bd.date || '',
-        text: r.text, photoUrl: r.photoUrl, color: r.color, createdAt: toMs_(r.createdAt)
+        title: r.title || '', text: r.text, photoUrl: r.photoUrl, color: r.color, createdAt: toMs_(r.createdAt)
       };
     });
   return { studentName: studentName, reflections: refs };

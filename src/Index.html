@@ -87,45 +87,55 @@
     .board-bar .sub{color:var(--muted);font-size:13px}
     .board-bar .bar-actions{display:flex;gap:8px;flex-wrap:wrap}
 
-    /* セクション（横に並ぶ列） */
-    #board{display:flex;gap:16px;align-items:flex-start;overflow-x:auto;padding-bottom:12px}
-    .section-col{flex:0 0 270px;background:rgba(255,255,255,.55);border:1px solid var(--border);
-      border-radius:14px;padding:10px;display:flex;flex-direction:column}
-    .section-head{display:flex;align-items:center;justify-content:space-between;gap:6px;padding:4px 6px 10px;font-weight:700}
-    .section-head .sec-name{font-size:16px}
-    .section-head .sec-tools button{border:none;background:transparent;cursor:pointer;font-size:14px;padding:2px 4px}
-    .card-list{display:flex;flex-direction:column;gap:12px;min-height:48px}
-    .add-card{margin-top:10px;border:1px dashed var(--border);background:transparent;border-radius:10px;
-      padding:10px;color:var(--muted);cursor:pointer;font-size:15px}
-    .add-card:hover{background:#fff;color:var(--text)}
+    /* セクション（横に並ぶ列・列内だけスクロール） */
+    #board{display:flex;gap:16px;align-items:stretch;overflow-x:auto;
+      height:calc(100vh - 184px);min-height:320px;padding-bottom:6px}
+    body:not(.login-mode) main:has(#board){padding-bottom:16px}
+    .section-col{flex:0 0 286px;background:rgba(255,255,255,.55);border:1px solid var(--border);
+      border-radius:14px;display:flex;flex-direction:column;overflow:hidden}
+    /* 固定ヘッダー（＋ボタンが上、その下にタイトル） */
+    .col-header{flex:0 0 auto;padding:10px 12px 8px;background:rgba(255,255,255,.75);border-bottom:1px solid var(--border)}
+    .add-bar{display:block;width:100%;border:1px dashed var(--accent2);background:#fff;color:var(--accent2);
+      border-radius:10px;padding:7px;font-size:16px;font-weight:700;cursor:pointer;margin-bottom:8px}
+    .add-bar:hover{background:var(--accent2);color:#fff}
+    .col-title{display:flex;align-items:center;justify-content:space-between;gap:6px}
+    .col-title .sec-name{font-weight:700;font-size:16px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+    .col-title .count{color:var(--muted);font-weight:400;font-size:13px;margin-left:4px}
+    .sec-tools button{border:none;background:transparent;cursor:pointer;font-size:14px;padding:2px 4px}
+    .card-list{flex:1 1 auto;overflow-y:auto;padding:12px;display:flex;flex-direction:column;gap:12px}
 
-    .card{width:100%;border-radius:14px;padding:14px;box-shadow:0 3px 10px rgba(0,0,0,.08);position:relative;
+    .card{width:100%;border-radius:14px;padding:12px 12px 10px;box-shadow:0 2px 8px rgba(0,0,0,.10);position:relative;
       background:#fff7c0;cursor:grab}
-    .card .vid{width:100%;height:160px;border:0;border-radius:10px;margin-top:10px;display:block}
-    .card .editable-hint{font-size:11px;color:rgba(0,0,0,.4);margin-top:6px}
+    .card .vid{width:100%;height:160px;border:0;border-radius:10px;margin-top:8px;display:block}
     /* カメラ */
     #camVid{width:100%;border-radius:12px;background:#000;max-height:60vh}
     .rec-dot{display:inline-block;width:10px;height:10px;border-radius:50%;background:#e8554e;margin-right:6px;animation:blink 1s infinite}
     @keyframes blink{50%{opacity:.2}}
     .card.dragging{opacity:.4}
-    .card.pinned{box-shadow:0 0 0 2px var(--accent2),0 4px 12px rgba(0,0,0,.14)}
-    .card .pin-badge{position:absolute;top:8px;left:8px;font-size:14px}
-    .card-actions .act.pinned{color:var(--accent2);font-weight:700}
-    .card .author{font-weight:700;font-size:16px;margin-bottom:6px}
-    .card .body{font-size:16px;white-space:pre-wrap;word-break:break-word;line-height:1.7}
-    .card img.photo{width:100%;border-radius:10px;margin-top:10px;display:block}
-    .card .time{color:rgba(0,0,0,.45);font-size:11px;margin-top:8px}
-    .card .del{position:absolute;top:8px;right:8px;background:rgba(255,255,255,.7);border:none;border-radius:8px;opacity:0;padding:2px 7px}
-    .card:hover .del{opacity:1}
-    .card-actions{display:flex;gap:14px;margin-top:10px;font-size:15px;align-items:center}
+    .card.pinned{box-shadow:0 0 0 2px var(--accent2),0 3px 10px rgba(0,0,0,.14)}
+    .pin-strip{font-size:11px;color:var(--accent2);font-weight:700;margin:-2px 0 6px}
+    /* 投稿者（小さめ） */
+    .card .meta-row{display:flex;align-items:center;gap:6px;color:var(--muted);font-size:12px;margin-bottom:4px;padding-right:44px}
+    .card .meta-row .who{font-weight:600;color:#555}
+    .card .card-title{font-weight:700;font-size:16px;line-height:1.4;margin:2px 0 2px;word-break:break-word}
+    .card .body{font-size:15px;white-space:pre-wrap;word-break:break-word;line-height:1.6}
+    .card img.photo{width:100%;border-radius:10px;margin-top:8px;display:block}
+    .card .time{color:rgba(0,0,0,.40);font-size:11px;margin-top:6px}
+    /* 右上のアイコン操作（小さく） */
+    .card .tools{position:absolute;top:8px;right:8px;display:flex;gap:2px}
+    .card .tools button{background:rgba(255,255,255,.65);border:none;border-radius:7px;cursor:pointer;
+      font-size:13px;line-height:1;padding:3px 5px;opacity:.55}
+    .card .tools button:hover{opacity:1}
+    .card .tools button.on{opacity:1}
+    .card-actions{display:flex;gap:12px;margin-top:8px;font-size:14px;align-items:center}
     .card-actions .act{cursor:pointer;user-select:none;background:rgba(255,255,255,.5);border:none;border-radius:8px;padding:3px 8px}
     .card-actions .act.liked{color:var(--accent);font-weight:700}
-    .comments{margin-top:10px;border-top:1px solid rgba(0,0,0,.08);padding-top:8px}
-    .comment{font-size:15px;margin-bottom:5px}
+    .comments{margin-top:8px;border-top:1px solid rgba(0,0,0,.08);padding-top:6px}
+    .comment{font-size:13px;margin-bottom:4px;line-height:1.4}
     .comment b{font-weight:700}
     .comment-form{display:flex;gap:6px;margin-top:6px}
-    .comment-form input{flex:1;padding:6px 8px;border:1px solid rgba(0,0,0,.15);border-radius:8px;font-size:15px;font-family:inherit}
-    .comment-form button{border:none;background:var(--accent2);color:#fff;border-radius:8px;padding:6px 10px}
+    .comment-form input{flex:1;padding:6px 8px;border:1px solid rgba(0,0,0,.15);border-radius:8px;font-size:13px;font-family:inherit;background:rgba(255,255,255,.7)}
+    .comment-form button{border:none;background:var(--accent2);color:#fff;border-radius:8px;padding:6px 10px;font-size:13px}
 
     .fab{position:fixed;right:24px;bottom:24px;width:60px;height:60px;border-radius:50%;background:var(--accent);
       color:#fff;border:none;font-size:30px;box-shadow:0 6px 16px rgba(0,0,0,.25);z-index:40}
@@ -418,15 +428,20 @@ var App = (function(){
   function buildColumn(sec, cards, isTeacher){
     var colEl=document.createElement('div');
     colEl.className='section-col'; colEl.dataset.sectionId=sec.sectionId;
+
+    // 固定ヘッダー：＋ボタンを上、その下にタイトル（スクロールしても動かない）
+    var head=document.createElement('div'); head.className='col-header';
     var tools='';
     if(isTeacher && !sec._none){
       tools='<span class="sec-tools"><button title="名前を変更" data-act="rename">✏</button>'
         +'<button title="削除" data-act="del">🗑</button></span>';
     }
-    var head=document.createElement('div');
-    head.className='section-head';
-    head.innerHTML='<span class="sec-name">'+esc(sec.name)+'</span>'+tools;
+    var addBtn = (!sec._none && user) ? '<button class="add-bar" data-act="add">＋ 投稿</button>' : '';
+    head.innerHTML=addBtn
+      +'<div class="col-title"><span class="sec-name">'+esc(sec.name)
+      +'<span class="count">'+cards.length+'</span></span>'+tools+'</div>';
     colEl.appendChild(head);
+    if(addBtn) head.querySelector('[data-act="add"]').addEventListener('click',function(){ openPost(sec.sectionId); });
     if(isTeacher && !sec._none){
       head.querySelector('[data-act="rename"]').addEventListener('click',function(){ renameSection(sec); });
       head.querySelector('[data-act="del"]').addEventListener('click',function(){ deleteSection(sec); });
@@ -435,12 +450,6 @@ var App = (function(){
     var list=document.createElement('div'); list.className='card-list'; list.dataset.sectionId=sec.sectionId;
     cards.slice().sort(clientCardCmp).forEach(function(c){ list.appendChild(cardEl(c)); });
     colEl.appendChild(list);
-
-    if(!sec._none && user){
-      var add=document.createElement('button'); add.className='add-card'; add.textContent='＋ 投稿する';
-      add.addEventListener('click',function(){ openPost(sec.sectionId); });
-      colEl.appendChild(add);
-    }
     return colEl;
   }
 
@@ -455,29 +464,35 @@ var App = (function(){
     var media='';
     if(r.photoUrl){
       if(r.mediaType==='video') media='<iframe class="vid" src="'+esc(r.photoUrl)+'" allow="autoplay" allowfullscreen></iframe>';
-      else media='<img class="photo" src="'+esc(r.photoUrl)+'" loading="lazy" referrerpolicy="no-referrer" style="width:100%;border-radius:10px;margin-top:10px;display:block">';
+      else media='<img class="photo" src="'+esc(r.photoUrl)+'" loading="lazy" referrerpolicy="no-referrer">';
     }
-    var html=(r.pinned?'<div class="pin-badge">📌</div>':'')
-      +'<div class="author">'+esc(r.studentName)+'</div>'
+    // 右上のアイコン操作（ピン📌・編集✏・削除🗑 ＝アイコンのみ・小さく）
+    var tools=canEdit
+      ? '<div class="tools">'
+        +'<button class="t-pin'+(r.pinned?' on':'')+'" title="'+(r.pinned?'ピン解除':'ピン留め')+'">📌</button>'
+        +'<button class="t-edit" title="編集">✏️</button>'
+        +'<button class="t-del" title="削除">🗑️</button></div>'
+      : '';
+    var html=tools
+      +(r.pinned?'<div class="pin-strip">📌 ピン留め</div>':'')
+      +'<div class="meta-row"><span class="who">'+esc(r.studentName)+'</span><span>'+fmt(r.createdAt)
+        +(r.updatedAt&&r.updatedAt>r.createdAt?'（編集済み）':'')+'</span></div>'
+      +(r.title?'<div class="card-title">'+esc(r.title)+'</div>':'')
       +(r.text?'<div class="body">'+esc(r.text)+'</div>':'')
       +media
-      +'<div class="time">'+fmt(r.createdAt)+(r.updatedAt&&r.updatedAt>r.createdAt?'（編集済み）':'')+'</div>'
       +'<div class="card-actions">'
       +'<button class="act like'+(r.likedByMe?' liked':'')+'">❤ <span class="lc">'+r.likeCount+'</span></button>'
-      +'<button class="act cbtn">💬 <span class="cc">'+r.comments.length+'</span></button>'
-      +(canEdit?'<button class="act pinbtn'+(r.pinned?' pinned':'')+'">📌 '+(r.pinned?'解除':'固定')+'</button>':'')
-      +(canEdit?'<button class="act ebtn">✏ 編集</button>':'')
-      +'</div><div class="comments hidden"></div>'
-      +(canEdit?'<button class="del">🗑</button>':'');
+      +'</div>'
+      +'<div class="comments"></div>';
     d.innerHTML=html;
 
     d.querySelector('.like').addEventListener('click',function(e){e.stopPropagation();like(r,d);});
-    d.querySelector('.cbtn').addEventListener('click',function(e){e.stopPropagation();toggleComments(r,d);});
     if(canEdit){
-      d.querySelector('.pinbtn').addEventListener('click',function(e){e.stopPropagation();togglePinCard(r);});
-      d.querySelector('.ebtn').addEventListener('click',function(e){e.stopPropagation();openEdit(r);});
-      d.querySelector('.del').addEventListener('click',function(e){e.stopPropagation();delCard(r);});
+      d.querySelector('.t-pin').addEventListener('click',function(e){e.stopPropagation();togglePinCard(r);});
+      d.querySelector('.t-edit').addEventListener('click',function(e){e.stopPropagation();openEdit(r);});
+      d.querySelector('.t-del').addEventListener('click',function(e){e.stopPropagation();delCard(r);});
     }
+    renderComments(r,d); // コメントは常時表示
     return d;
   }
 
@@ -518,19 +533,12 @@ var App = (function(){
       .then(function(res){ r.pinned=res.pinned; lastSig=computeSig(); })
       .catch(function(e){ r.pinned=!np; renderBoard(); err(e); });
   }
-  function toggleComments(r,d){
-    var box=d.querySelector('.comments');
-    if(!box.classList.contains('hidden')){ box.classList.add('hidden'); return; }
-    box.classList.remove('hidden');
-    renderComments(r,d);
-  }
+  // コメントは投稿の下に常時表示
   function renderComments(r,d){
     var box=d.querySelector('.comments');
     var html=r.comments.map(function(c){return '<div class="comment"><b>'+esc(c.author)+'</b>：'+esc(c.text)+'</div>';}).join('');
     if(user){
-      html+='<div class="comment-form"><input placeholder="コメント…"><button>送信</button></div>';
-    }else{
-      html+='<div style="font-size:12px;color:var(--muted)">コメントは生徒ログインが必要です</div>';
+      html+='<div class="comment-form"><input placeholder="コメントを追加…"><button>送信</button></div>';
     }
     box.innerHTML=html;
     if(user){
@@ -538,7 +546,7 @@ var App = (function(){
       var send=function(){
         var t=input.value.trim(); if(!t)return; btn.disabled=true;
         run('addComment',r.reflectionId,user.name,user.password,t).then(function(list){
-          r.comments=list; d.querySelector('.cc').textContent=list.length; renderComments(r,d);
+          r.comments=list; renderComments(r,d); lastSig=computeSig();
         }).catch(function(e){err(e);btn.disabled=false;});
       };
       btn.addEventListener('click',send);
@@ -557,6 +565,8 @@ var App = (function(){
   // -------- ドラッグ＆ドロップ（セクション間移動・並べ替え） --------
   function setupDnD(boardEl){
     boardEl.addEventListener('dragstart',function(e){
+      // 入力欄・ボタン・コメント操作中はドラッグを開始しない
+      if(e.target.closest('input,textarea,button,.comments')){ e.preventDefault(); return; }
       var card=e.target.closest('.card'); if(!card)return;
       dragEl=card; setTimeout(function(){card.classList.add('dragging');},0);
     });
@@ -653,17 +663,19 @@ var App = (function(){
     if(!user){toast('投稿は生徒ログインが必要です');return;}
     mode='post'; postSectionId=sectionId||''; editTarget=null;
     pendingMedia=null; removeExisting=false; pickedColor=COLORS[0];
-    showMediaModal('振り返りを投稿（'+esc(user.name)+'）','投稿する','');
+    showMediaModal('投稿する','','');
   }
   function openEdit(card){
     mode='edit'; editTarget=card;
     pendingMedia=null; removeExisting=false; pickedColor=card.color||COLORS[0];
-    showMediaModal('投稿を編集'+(teacherPass&&card.studentName!==(user&&user.name)?'（'+esc(card.studentName)+'）':''),'保存する',card.text||'');
+    showMediaModal('保存する',card.title||'',card.text||'');
   }
 
-  function showMediaModal(title,okLabel,text){
-    var html='<h3>'+title+'</h3>'
-      +'<label class="field"><span>振り返り</span><textarea id="mText" rows="4" placeholder="わかったこと・感じたこと…">'+esc(text)+'</textarea></label>'
+  function showMediaModal(okLabel,titleVal,textVal){
+    var heading=(mode==='edit')?'<h3>投稿を編集</h3>':'';
+    var html=heading
+      +'<label class="field"><span>タイトル（任意・太字で表示）</span><input id="mTitle" type="text" placeholder="タイトル" value="'+esc(titleVal)+'"></label>'
+      +'<label class="field"><span>本文</span><textarea id="mText" rows="4" placeholder="本文を入力（タイトルだけ・写真だけでもOK）">'+esc(textVal)+'</textarea></label>'
       +'<label class="field"><span>写真・動画（任意）</span><input type="file" id="mFile" accept="image/*,video/*"></label>'
       +'<div style="margin:-6px 0 12px"><button type="button" class="ghost-btn" onclick="App.openCamera()">📷 カメラを起動</button></div>'
       +'<div id="mPrev" style="margin-bottom:12px"></div>'
@@ -734,21 +746,22 @@ var App = (function(){
   function clearMedia(){ pendingMedia=null; removeExisting=true; if($('mFile'))$('mFile').value=''; renderMediaPreview(); }
 
   function submitMedia(){
+    var title=$('mTitle')?$('mTitle').value.trim():'';
     var text=$('mText').value.trim();
     var hasMediaAfter = pendingMedia || (mode==='edit'&&editTarget&&editTarget.photoUrl&&!removeExisting);
-    if(!text && !hasMediaAfter){toast('テキストか写真・動画を入れてください');return;}
+    if(!title && !text && !hasMediaAfter){toast('タイトルか本文、写真・動画を入れてください');return;}
     var btn=$('mSubmit'); btn.disabled=true; btn.textContent='送信中…';
     var fail=function(e){err(e);btn.disabled=false;btn.textContent='送信';};
     if(mode==='edit'){
-      run('editReflection',editTarget.reflectionId,user?user.name:null,user?user.password:null,teacherPass,text,pickedColor,pendingMedia,removeExisting)
+      run('editReflection',editTarget.reflectionId,user?user.name:null,user?user.password:null,teacherPass,title,text,pickedColor,pendingMedia,removeExisting)
         .then(function(res){
           var u=res.update, card=findCard(u.reflectionId);
-          if(card){ card.text=u.text; card.color=u.color; card.photoUrl=u.photoUrl; card.mediaType=u.mediaType; card.updatedAt=u.updatedAt; replaceCardDom(card); }
+          if(card){ card.title=u.title; card.text=u.text; card.color=u.color; card.photoUrl=u.photoUrl; card.mediaType=u.mediaType; card.updatedAt=u.updatedAt; replaceCardDom(card); }
           else refreshBoard();
           closeModal(); toast('保存しました'); lastSig=computeSig();
         }).catch(fail);
     }else{
-      run('postReflection',current.board.boardId,postSectionId,user.name,user.password,text,pickedColor,pendingMedia)
+      run('postReflection',current.board.boardId,postSectionId,user.name,user.password,title,text,pickedColor,pendingMedia)
         .then(function(res){
           var card=res.card; current.cards.push(card); insertCardDom(card);
           closeModal(); toast('投稿しました！'); lastSig=computeSig();
@@ -964,6 +977,7 @@ var Teacher=(function(){
         +'<div>件数 '+data.reflections.length+'件</div></div>';
       data.reflections.forEach(function(r){
         html+='<div class="print-card"><div class="pmeta">'+U.esc(r.subject)+' ／ '+U.esc(r.unit)+' ／ '+U.esc(r.date)+'</div>'
+          +(r.title?'<div style="font-weight:700">'+U.esc(r.title)+'</div>':'')
           +(r.text?'<div>'+U.esc(r.text)+'</div>':'')
           +(r.photoUrl?'<img src="'+U.esc(r.photoUrl)+'" referrerpolicy="no-referrer">':'')+'</div>';
       });
@@ -972,6 +986,7 @@ var Teacher=(function(){
   }
   function printCard(author,c){
     return '<div class="print-card"><div class="pmeta">'+U.esc(author)+'（❤'+c.likeCount+' / 💬'+c.comments.length+'）</div>'
+      +(c.title?'<div style="font-weight:700">'+U.esc(c.title)+'</div>':'')
       +(c.text?'<div>'+U.esc(c.text)+'</div>':'')
       +(c.photoUrl?'<img src="'+U.esc(c.photoUrl)+'" referrerpolicy="no-referrer">':'')
       +(c.comments.length?'<div class="pmeta" style="margin-top:4px">コメント: '+c.comments.map(function(x){return U.esc(x.author+'「'+x.text+'」');}).join(' / ')+'</div>':'')
