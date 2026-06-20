@@ -12,6 +12,7 @@ var PROP_TEACHER_SALT = 'TEACHER_SALT';
 
 var SHEET_STUDENTS = 'Students';
 var SHEET_BOARDS = 'Boards';
+var SHEET_SECTIONS = 'Sections';
 var SHEET_REFLECTIONS = 'Reflections';
 var SHEET_COMMENTS = 'Comments';
 var SHEET_LIKES = 'Likes';
@@ -19,7 +20,9 @@ var SHEET_LIKES = 'Likes';
 var SHEET_DEFS = {};
 SHEET_DEFS[SHEET_STUDENTS] = ['number', 'name', 'salt', 'passwordHash', 'createdAt'];
 SHEET_DEFS[SHEET_BOARDS] = ['boardId', 'subject', 'unit', 'date', 'title', 'createdAt'];
-SHEET_DEFS[SHEET_REFLECTIONS] = ['reflectionId', 'boardId', 'studentName', 'text', 'photoUrl', 'photoFileId', 'color', 'sortOrder', 'createdAt'];
+SHEET_DEFS[SHEET_SECTIONS] = ['sectionId', 'boardId', 'name', 'sortOrder', 'createdAt'];
+// 末尾の sectionId / mediaType / updatedAt は後から追加した列（既存データは移行で保持される）
+SHEET_DEFS[SHEET_REFLECTIONS] = ['reflectionId', 'boardId', 'studentName', 'text', 'photoUrl', 'photoFileId', 'color', 'sortOrder', 'createdAt', 'sectionId', 'mediaType', 'updatedAt'];
 SHEET_DEFS[SHEET_COMMENTS] = ['commentId', 'reflectionId', 'author', 'text', 'createdAt'];
 SHEET_DEFS[SHEET_LIKES] = ['reflectionId', 'studentName', 'createdAt'];
 
@@ -84,22 +87,31 @@ function ensureInit_() {
     var lastRow = sheet.getLastRow();
     var width = Math.max(def.length, sheet.getLastColumn());
     var header = sheet.getRange(1, 1, 1, width).getValues()[0];
+
     var matches = true;
     for (var k = 0; k < def.length; k++) {
       if (String(header[k] || '') !== def[k]) { matches = false; break; }
     }
-    if (!matches) {
-      if (lastRow <= 1) {
-        // データがまだ無いので安全にヘッダーを置き換える
-        if (lastRow >= 1) sheet.getRange(1, 1, 1, width).clearContent();
-        sheet.getRange(1, 1, 1, def.length).setValues([def]);
-      } else {
-        // データがある旧スキーマのシートは破壊せず退避し、新しい空シートを作る
-        var backup = name + '_旧_' + Utilities.formatDate(new Date(), 'Asia/Tokyo', 'yyyyMMdd_HHmmss');
-        sheet.setName(backup);
-        var fresh = ss.insertSheet(name);
-        fresh.getRange(1, 1, 1, def.length).setValues([def]);
-      }
+    if (matches) return;
+
+    // 既存の各列が定義と矛盾しないか（＝列を末尾に追加しただけ等の安全な変更か）を判定。
+    // 既存の非空ヘッダーが def の同じ位置と一致していれば、データを壊さず見出しだけ補正する。
+    var safeRelabel = true;
+    for (var c = 0; c < width; c++) {
+      var hv = String(header[c] || '');
+      if (hv !== '' && hv !== (def[c] || '')) { safeRelabel = false; break; }
+    }
+
+    if (safeRelabel || lastRow <= 1) {
+      // データはそのまま、見出し行だけを定義どおりに上書き（新しい列は既存行で空のまま）
+      if (lastRow >= 1 && width > def.length) sheet.getRange(1, 1, 1, width).clearContent();
+      sheet.getRange(1, 1, 1, def.length).setValues([def]);
+    } else {
+      // 列の意味が食い違う旧スキーマ（例: 旧 Boards の classCode）は破壊せず退避し、新規作成
+      var backup = name + '_旧_' + Utilities.formatDate(new Date(), 'Asia/Tokyo', 'yyyyMMdd_HHmmss');
+      sheet.setName(backup);
+      var fresh = ss.insertSheet(name);
+      fresh.getRange(1, 1, 1, def.length).setValues([def]);
     }
   });
   // 自動生成された空の "シート1"/"Sheet1" を削除
@@ -380,11 +392,13 @@ function createBoard(subject, unit, date, title) {
   getSheet_(SHEET_BOARDS).appendRow([id, subject, unit, "'" + date, title, new Date()]);
   var created = getBoard(id);
   if (!created) throw new Error('ボードの作成に失敗しました。もう一度お試しください。');
+  // 既定セクションを1つ用意しておく（最初から投稿できるように）
+  getSheet_(SHEET_SECTIONS).appendRow([genId_('s'), id, 'みんなの投稿', 1, new Date()]);
   return created;
 }
 
 function deleteBoard(boardId) {
-  // 紐づく振り返り・コメント・いいね・写真を削除
+  // 紐づく振り返り・コメント・いいね・写真・セクションを削除
   var refs = readSheet_(SHEET_REFLECTIONS).filter(function (r) { return r.boardId === boardId; });
   refs.forEach(function (r) {
     if (r.photoFileId) { try { DriveApp.getFileById(r.photoFileId).setTrashed(true); } catch (e) {} }
@@ -392,8 +406,68 @@ function deleteBoard(boardId) {
     deleteRowsWhere_(SHEET_LIKES, 'reflectionId', r.reflectionId);
   });
   deleteRowsWhere_(SHEET_REFLECTIONS, 'boardId', boardId);
+  deleteRowsWhere_(SHEET_SECTIONS, 'boardId', boardId);
   deleteRowsWhere_(SHEET_BOARDS, 'boardId', boardId);
   return true;
+}
+
+// ============================ セクション ============================
+
+function getSections(boardId) {
+  var secs = readSheet_(SHEET_SECTIONS)
+    .filter(function (s) { return s.boardId === boardId; })
+    .map(function (s) { return { sectionId: s.sectionId, boardId: s.boardId, name: s.name, sortOrder: Number(s.sortOrder) || 0 }; });
+  secs.sort(function (a, b) { return a.sortOrder - b.sortOrder; });
+  return secs;
+}
+
+/** セクション作成（先生のみ）。 */
+function createSection(boardId, name, teacherPassword) {
+  if (!isTeacher_(teacherPassword)) throw new Error('セクションの操作は先生のみ可能です。');
+  name = String(name || '').trim();
+  if (!name) throw new Error('セクション名を入力してください。');
+  if (!getBoard(boardId)) throw new Error('ボードが見つかりません。');
+  var maxOrder = 0;
+  getSections(boardId).forEach(function (s) { if (s.sortOrder > maxOrder) maxOrder = s.sortOrder; });
+  getSheet_(SHEET_SECTIONS).appendRow([genId_('s'), boardId, name, maxOrder + 1, new Date()]);
+  return getSections(boardId);
+}
+
+/** セクション改名（先生のみ）。 */
+function renameSection(sectionId, name, teacherPassword) {
+  if (!isTeacher_(teacherPassword)) throw new Error('セクションの操作は先生のみ可能です。');
+  name = String(name || '').trim();
+  if (!name) throw new Error('セクション名を入力してください。');
+  var sheet = getSheet_(SHEET_SECTIONS);
+  var s = readSheet_(SHEET_SECTIONS).filter(function (x) { return x.sectionId === sectionId; })[0];
+  if (!s) throw new Error('セクションが見つかりません。');
+  sheet.getRange(s._row, SHEET_DEFS[SHEET_SECTIONS].indexOf('name') + 1).setValue(name);
+  return getSections(s.boardId);
+}
+
+/** セクション削除（先生のみ）。中の投稿は未分類（既定列）に移します。 */
+function deleteSection(sectionId, teacherPassword) {
+  if (!isTeacher_(teacherPassword)) throw new Error('セクションの操作は先生のみ可能です。');
+  var s = readSheet_(SHEET_SECTIONS).filter(function (x) { return x.sectionId === sectionId; })[0];
+  if (!s) return true;
+  var boardId = s.boardId;
+  // このセクションの投稿は sectionId を空にして未分類へ（投稿自体は消さない）
+  var sheet = getSheet_(SHEET_REFLECTIONS);
+  var secCol = SHEET_DEFS[SHEET_REFLECTIONS].indexOf('sectionId') + 1;
+  readSheet_(SHEET_REFLECTIONS).forEach(function (r) {
+    if (r.sectionId === sectionId) sheet.getRange(r._row, secCol).setValue('');
+  });
+  deleteRowsWhere_(SHEET_SECTIONS, 'sectionId', sectionId);
+  return getSections(boardId);
+}
+
+/** ボードに最低1つセクションがあることを保証し、既定セクションIDを返す。 */
+function ensureDefaultSection_(boardId) {
+  var secs = getSections(boardId);
+  if (secs.length) return secs[0].sectionId;
+  var id = genId_('s');
+  getSheet_(SHEET_SECTIONS).appendRow([id, boardId, 'みんなの投稿', 1, new Date()]);
+  return id;
 }
 
 // ============================ 振り返り（カード） ============================
@@ -428,12 +502,15 @@ function getBoardData(boardId, currentName) {
   var cards = refs.map(function (r) {
     return {
       reflectionId: r.reflectionId,
+      sectionId: r.sectionId || '',
       studentName: r.studentName,
       text: r.text,
       photoUrl: r.photoUrl,
+      mediaType: r.mediaType || (r.photoUrl ? 'image' : ''),
       color: r.color,
       sortOrder: Number(r.sortOrder) || 0,
       createdAt: toMs_(r.createdAt),
+      updatedAt: toMs_(r.updatedAt),
       likeCount: likeCount[r.reflectionId] || 0,
       likedByMe: !!likedByMe[r.reflectionId],
       comments: byRef[r.reflectionId] || []
@@ -441,23 +518,51 @@ function getBoardData(boardId, currentName) {
   });
   cards.sort(function (a, b) {
     if (a.sortOrder !== b.sortOrder) return a.sortOrder - b.sortOrder;
-    return new Date(a.createdAt) - new Date(b.createdAt);
+    return (a.createdAt || 0) - (b.createdAt || 0);
   });
 
-  return { board: board, cards: cards };
+  return { board: board, sections: getSections(boardId), cards: cards };
 }
 
-function postReflection(boardId, studentName, password, text, color, photo) {
+/**
+ * リアルタイム更新用の軽量シグネチャ。
+ * これが前回と変われば、クライアントは getBoardData を取り直して再描画する。
+ */
+function getBoardSignature(boardId) {
+  var sig = '';
+  var refCount = 0, maxMs = 0;
+  readSheet_(SHEET_REFLECTIONS).forEach(function (r) {
+    if (r.boardId !== boardId) return;
+    refCount++;
+    var u = toMs_(r.updatedAt) || toMs_(r.createdAt) || 0;
+    if (u > maxMs) maxMs = u;
+  });
+  var secCount = readSheet_(SHEET_SECTIONS).filter(function (s) { return s.boardId === boardId; }).length;
+  // いいね・コメントの増減も拾うため総数を含める（このボード分に限定）
+  var refIds = {};
+  readSheet_(SHEET_REFLECTIONS).forEach(function (r) { if (r.boardId === boardId) refIds[r.reflectionId] = true; });
+  var likeCount = readSheet_(SHEET_LIKES).filter(function (l) { return refIds[l.reflectionId]; }).length;
+  var comCount = readSheet_(SHEET_COMMENTS).filter(function (c) { return refIds[c.reflectionId]; }).length;
+  sig = refCount + '|' + maxMs + '|' + secCount + '|' + likeCount + '|' + comCount;
+  return sig;
+}
+
+/**
+ * 投稿。media は { data(base64), mimeType, filename, kind:'image'|'video' } または null。
+ */
+function postReflection(boardId, sectionId, studentName, password, text, color, media) {
   if (!verifyStudent_(studentName, password)) throw new Error('ログイン情報が正しくありません。');
   text = String(text || '').trim();
-  if (!text && !photo) throw new Error('テキストか写真を入力してください。');
+  if (!text && !media) throw new Error('テキストか写真・動画を入力してください。');
   var board = getBoard(boardId);
   if (!board) throw new Error('ボードが見つかりません。');
 
-  var photoUrl = '', photoFileId = '';
-  if (photo && photo.data) {
-    var saved = savePhoto_(photo, board);
-    photoUrl = saved.url; photoFileId = saved.fileId;
+  if (!sectionId) sectionId = ensureDefaultSection_(boardId);
+
+  var url = '', fileId = '', mediaType = '';
+  if (media && media.data) {
+    var saved = saveMedia_(media, board);
+    url = saved.url; fileId = saved.fileId; mediaType = saved.mediaType;
   }
 
   // 末尾に並べる
@@ -467,10 +572,51 @@ function postReflection(boardId, studentName, password, text, color, photo) {
   });
 
   var id = genId_('r');
+  var now = new Date();
+  // 列順は SHEET_DEFS[SHEET_REFLECTIONS] と一致させること
   getSheet_(SHEET_REFLECTIONS).appendRow([
-    id, boardId, studentName, text, photoUrl, photoFileId, color || '#fff7c0', maxOrder + 1, new Date()
+    id, boardId, studentName, text, url, fileId, color || '#fff7c0', maxOrder + 1, now, sectionId, mediaType, now
   ]);
   return getBoardData(boardId, studentName);
+}
+
+/**
+ * 投稿の編集。本人 または 先生のみ。
+ * media を渡せば差し替え、removeMedia=true なら添付を削除、どちらも無ければ本文/色のみ更新。
+ */
+function editReflection(reflectionId, studentName, password, teacherPassword, text, color, media, removeMedia) {
+  var sheet = getSheet_(SHEET_REFLECTIONS);
+  var r = readSheet_(SHEET_REFLECTIONS).filter(function (x) { return x.reflectionId === reflectionId; })[0];
+  if (!r) throw new Error('投稿が見つかりません。');
+  var allowed = isTeacher_(teacherPassword) || (r.studentName === studentName && verifyStudent_(studentName, password));
+  if (!allowed) throw new Error('編集する権限がありません。');
+
+  var def = SHEET_DEFS[SHEET_REFLECTIONS];
+  text = String(text || '').trim();
+
+  // 変更後に添付が残るか（先に検証し、空投稿になるなら何も書き換えない）
+  var willHaveMedia = (media && media.data) ? true : (removeMedia ? false : !!r.photoFileId);
+  if (!text && !willHaveMedia) throw new Error('テキストか写真・動画のどちらかは必要です。');
+
+  sheet.getRange(r._row, def.indexOf('text') + 1).setValue(text);
+  if (color) sheet.getRange(r._row, def.indexOf('color') + 1).setValue(color);
+
+  if (media && media.data) {
+    if (r.photoFileId) { try { DriveApp.getFileById(r.photoFileId).setTrashed(true); } catch (e) {} }
+    var board = getBoard(r.boardId) || { subject: 'その他', unit: '' };
+    var saved = saveMedia_(media, board);
+    sheet.getRange(r._row, def.indexOf('photoUrl') + 1).setValue(saved.url);
+    sheet.getRange(r._row, def.indexOf('photoFileId') + 1).setValue(saved.fileId);
+    sheet.getRange(r._row, def.indexOf('mediaType') + 1).setValue(saved.mediaType);
+  } else if (removeMedia) {
+    if (r.photoFileId) { try { DriveApp.getFileById(r.photoFileId).setTrashed(true); } catch (e) {} }
+    sheet.getRange(r._row, def.indexOf('photoUrl') + 1).setValue('');
+    sheet.getRange(r._row, def.indexOf('photoFileId') + 1).setValue('');
+    sheet.getRange(r._row, def.indexOf('mediaType') + 1).setValue('');
+  }
+
+  sheet.getRange(r._row, def.indexOf('updatedAt') + 1).setValue(new Date());
+  return getBoardData(r.boardId, studentName);
 }
 
 /** 削除：本人 または 先生。 */
@@ -483,6 +629,23 @@ function deleteReflection(reflectionId, studentName, password, teacherPassword) 
   deleteRowsWhere_(SHEET_COMMENTS, 'reflectionId', reflectionId);
   deleteRowsWhere_(SHEET_LIKES, 'reflectionId', reflectionId);
   deleteRowsWhere_(SHEET_REFLECTIONS, 'reflectionId', reflectionId);
+  return true;
+}
+
+/** ドラッグ＆ドロップ後：並び順とセクション移動を保存。items=[{id, sectionId}] 。 */
+function updateLayout(boardId, items) {
+  var sheet = getSheet_(SHEET_REFLECTIONS);
+  var def = SHEET_DEFS[SHEET_REFLECTIONS];
+  var orderCol = def.indexOf('sortOrder') + 1;
+  var secCol = def.indexOf('sectionId') + 1;
+  var rowById = {};
+  readSheet_(SHEET_REFLECTIONS).forEach(function (r) { rowById[r.reflectionId] = r._row; });
+  (items || []).forEach(function (it, idx) {
+    var row = rowById[it.id];
+    if (!row) return;
+    sheet.getRange(row, orderCol).setValue(idx + 1);
+    sheet.getRange(row, secCol).setValue(it.sectionId || '');
+  });
   return true;
 }
 
@@ -536,17 +699,26 @@ function addComment(reflectionId, author, password, text) {
     .map(function (c) { return { commentId: c.commentId, author: c.author, text: c.text, createdAt: toMs_(c.createdAt) }; });
 }
 
-// ============================ 写真 ============================
+// ============================ メディア（写真・動画） ============================
 
-function savePhoto_(photo, board) {
+/** 写真または動画を Drive に保存し、表示用URLと種別を返す。 */
+function saveMedia_(media, board) {
   var folder = getPhotoFolder_();
-  var subName = board.subject + '_' + board.unit;
+  var subName = (board.subject || 'その他') + '_' + (board.unit || '');
   var sub = getOrCreateSubfolder_(folder, subName);
-  var bytes = Utilities.base64Decode(photo.data);
-  var blob = Utilities.newBlob(bytes, photo.mimeType || 'image/jpeg', photo.filename || ('photo_' + Date.now() + '.jpg'));
+  var mime = media.mimeType || 'image/jpeg';
+  var isVideo = (media.kind === 'video') || /^video\//.test(mime);
+  var bytes = Utilities.base64Decode(media.data);
+  var defName = (isVideo ? 'video_' : 'photo_') + Date.now() + (isVideo ? '.mp4' : '.jpg');
+  var blob = Utilities.newBlob(bytes, mime, media.filename || defName);
   var file = sub.createFile(blob);
   file.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW);
-  return { fileId: file.getId(), url: 'https://drive.google.com/thumbnail?id=' + file.getId() + '&sz=w1000' };
+  var id = file.getId();
+  if (isVideo) {
+    // 動画は preview（iframe）で再生する
+    return { fileId: id, url: 'https://drive.google.com/file/d/' + id + '/preview', mediaType: 'video' };
+  }
+  return { fileId: id, url: 'https://drive.google.com/thumbnail?id=' + id + '&sz=w1000', mediaType: 'image' };
 }
 function getOrCreateSubfolder_(parent, name) {
   var it = parent.getFoldersByName(name);
