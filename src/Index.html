@@ -85,7 +85,9 @@
       border-left:8px solid var(--accent2);border-radius:14px;padding:14px 18px;margin-bottom:18px;gap:10px;flex-wrap:wrap}
     .board-bar .title{font-weight:700;font-size:18px}
     .board-bar .sub{color:var(--muted);font-size:13px}
-    .board-bar .bar-actions{display:flex;gap:8px;flex-wrap:wrap}
+    .board-bar .bar-actions{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+    .sort-select{border:1px solid var(--border);border-radius:10px;padding:8px 10px;font-family:inherit;
+      font-size:14px;background:#fff;color:var(--text)}
 
     /* セクション（横に並ぶ列・列内だけスクロール） */
     #board{display:flex;gap:16px;align-items:stretch;overflow-x:auto;
@@ -115,8 +117,22 @@
     .card .meta-row .who{font-weight:600;color:#555}
     .card .card-title{font-weight:700;font-size:16px;line-height:1.4;margin:2px 0 2px;word-break:break-word}
     .card .body{font-size:15px;white-space:pre-wrap;word-break:break-word;line-height:1.6}
-    .card img.photo{width:100%;border-radius:10px;margin-top:8px;display:block}
+    .card img.photo{width:100%;border-radius:10px;margin-top:8px;display:block;cursor:zoom-in}
+    .card .media-wrap{position:relative;margin-top:8px}
+    .card .media-wrap .vid{margin-top:0}
+    .card .media-exp{position:absolute;top:8px;right:8px;background:rgba(0,0,0,.6);color:#fff;border:none;
+      border-radius:8px;padding:4px 9px;font-size:12px;cursor:pointer}
+    .card .media-exp:hover{background:rgba(0,0,0,.8)}
+    .card .pdf-tag{display:inline-block;margin-top:8px;background:#fbeaea;color:#c0392b;border-radius:8px;
+      padding:6px 10px;font-size:13px;font-weight:600;cursor:zoom-in}
     .card .time{color:rgba(0,0,0,.40);font-size:11px;margin-top:6px}
+    /* 拡大プレビュー（ライトボックス） */
+    .lightbox{position:fixed;inset:0;background:rgba(0,0,0,.86);z-index:500;display:flex;
+      align-items:center;justify-content:center;padding:24px}
+    .lightbox img{max-width:95vw;max-height:90vh;border-radius:8px;background:#000}
+    .lightbox iframe{width:92vw;height:90vh;border:0;border-radius:8px;background:#fff}
+    .lightbox .lb-close{position:absolute;top:14px;right:18px;background:rgba(255,255,255,.92);border:none;
+      border-radius:50%;width:44px;height:44px;font-size:24px;line-height:1;cursor:pointer}
     /* 右上の⋮メニュー */
     .card .tools{position:absolute;top:6px;right:6px}
     .card .tools .t-menu{background:rgba(255,255,255,.6);border:none;border-radius:7px;cursor:pointer;
@@ -389,11 +405,18 @@ var App = (function(){
     current.sections=data.sections||[];
     current.cards=data.cards||[];
   }
+  var sortMode='manual';   // 'manual'(古い順/ドラッグ順) | 'new' | 'likes' | 'comments'
   function clientCardCmp(a,b){
+    // ピン留めは常に先頭
     if(!!a.pinned!==!!b.pinned) return a.pinned?-1:1;
+    if(sortMode==='new')      return (b.createdAt||0)-(a.createdAt||0);
+    if(sortMode==='likes')    { var dl=(b.likeCount||0)-(a.likeCount||0); if(dl) return dl; return (a.createdAt||0)-(b.createdAt||0); }
+    if(sortMode==='comments') { var dc=((b.comments?b.comments.length:0))-((a.comments?a.comments.length:0)); if(dc) return dc; return (a.createdAt||0)-(b.createdAt||0); }
+    // manual：ドラッグで決めた並び（sortOrder）→ 作成順
     if(a.sortOrder!==b.sortOrder) return a.sortOrder-b.sortOrder;
     return (a.createdAt||0)-(b.createdAt||0);
   }
+  function setSort(m){ sortMode=m; renderBoard(); }
   function openBoard(boardId){
     stopPolling();
     spinner();
@@ -412,6 +435,10 @@ var App = (function(){
       +'<div><div class="title">'+esc(b.title)+'</div>'
       +'<div class="sub">'+esc(b.subject)+' ・ '+esc(b.unit)+' ・ '+esc(b.date)+'</div></div>'
       +'<div class="bar-actions">'
+      +'<select class="sort-select" onchange="App.setSort(this.value)" title="並べ替え">'
+        +sortOpt('manual','標準（古い順）')+sortOpt('new','新しい順')
+        +sortOpt('likes','いいねが多い順')+sortOpt('comments','コメントが多い順')
+      +'</select>'
       +(isTeacher?'<button class="ghost-btn" onclick="App.addSection()">＋ セクション</button>':'')
       +'<button class="ghost-btn" onclick="App.refreshBoard()">↻ 更新</button>'
       +'<button class="ghost-btn" onclick="App.leaveBoard()">← ボード一覧</button>'
@@ -468,6 +495,8 @@ var App = (function(){
     return colEl;
   }
 
+  function sortOpt(v,label){ return '<option value="'+v+'"'+(sortMode===v?' selected':'')+'>並べ替え：'+label+'</option>'; }
+
   function refreshBoard(){ if(current.board) openBoard(current.board.boardId); }
   function leaveBoard(){ stopPolling(); current.board=null; home(); }
 
@@ -478,8 +507,17 @@ var App = (function(){
     var canEdit = teacherPass || (user && user.name===r.studentName);
     var media='';
     if(r.photoUrl){
-      if(r.mediaType==='video') media='<iframe class="vid" src="'+esc(r.photoUrl)+'" allow="autoplay" allowfullscreen></iframe>';
-      else media='<img class="photo" src="'+esc(r.photoUrl)+'" loading="lazy" referrerpolicy="no-referrer">';
+      var fid=driveFileId(r.photoUrl);
+      if(r.mediaType==='video'){
+        media='<div class="media-wrap"><iframe class="vid" src="'+esc(r.photoUrl)+'" allow="autoplay" allowfullscreen></iframe>'
+          +'<button class="media-exp" data-file="'+esc(fid)+'" data-kind="video">⛶ 拡大</button></div>';
+      }else if(r.mediaType==='pdf'){
+        media='<div class="media-wrap"><iframe class="vid" src="'+esc(r.photoUrl)+'"></iframe>'
+          +'<button class="media-exp" data-file="'+esc(fid)+'" data-kind="pdf">⛶ 拡大</button></div>'
+          +'<span class="pdf-tag" data-file="'+esc(fid)+'" data-kind="pdf">📄 PDFを開く</span>';
+      }else{
+        media='<img class="photo" data-file="'+esc(fid)+'" data-kind="image" src="'+esc(r.photoUrl)+'" loading="lazy" referrerpolicy="no-referrer">';
+      }
     }
     // 右上の⋮メニュー（ピン留め・編集・削除）
     var tools=canEdit
@@ -504,6 +542,10 @@ var App = (function(){
     d.innerHTML=html;
 
     d.querySelector('.like').addEventListener('click',function(e){e.stopPropagation();like(r,d);});
+    // メディアをクリック／⛶で拡大表示
+    [].forEach.call(d.querySelectorAll('[data-file]'),function(el){
+      el.addEventListener('click',function(e){ e.stopPropagation(); openLightbox(el.dataset.file, el.dataset.kind); });
+    });
     if(canEdit){
       var menu=d.querySelector('.menu');
       d.querySelector('.t-menu').addEventListener('click',function(e){
@@ -524,6 +566,26 @@ var App = (function(){
   function cardNode(id){ return document.querySelector('.card[data-id="'+id+'"]'); }
   function closeAllMenus(){ [].forEach.call(document.querySelectorAll('.card .menu'),function(m){m.classList.add('hidden');}); }
   document.addEventListener('click',closeAllMenus);
+
+  // -------- 拡大プレビュー（ライトボックス） --------
+  function driveFileId(url){
+    if(!url) return '';
+    var m=String(url).match(/[?&]id=([^&]+)/)||String(url).match(/\/file\/d\/([^/]+)/);
+    return m?m[1]:'';
+  }
+  function openLightbox(fileId,kind){
+    if(!fileId){ toast('このメディアは拡大表示できません'); return; }
+    var inner=(kind==='image')
+      ? '<img src="https://drive.google.com/thumbnail?id='+esc(fileId)+'&sz=w1920" referrerpolicy="no-referrer">'
+      : '<iframe src="https://drive.google.com/file/d/'+esc(fileId)+'/preview" allow="autoplay" allowfullscreen></iframe>';
+    var lb=document.createElement('div'); lb.className='lightbox';
+    lb.innerHTML=inner+'<button class="lb-close" title="閉じる">×</button>';
+    lb.addEventListener('click',function(e){ if(e.target===lb||e.target.classList.contains('lb-close')) closeLightbox(); });
+    document.body.appendChild(lb);
+    document.addEventListener('keydown',lbEsc);
+  }
+  function lbEsc(e){ if(e.key==='Escape') closeLightbox(); }
+  function closeLightbox(){ var lb=document.querySelector('.lightbox'); if(lb)lb.remove(); document.removeEventListener('keydown',lbEsc); }
   function insertCardDom(card){
     var board=$('board'); if(!board){ refreshBoard(); return; }
     var list=board.querySelector('.card-list[data-section-id="'+(card.sectionId||'')+'"]');
@@ -669,7 +731,7 @@ var App = (function(){
     return current.cards.length+'|'+maxMs+'|'+current.sections.length+'|'+likes+'|'+coms;
   }
   function busy(){
-    if($('modalRoot').innerHTML) return true;
+    if($('modalRoot').innerHTML || document.querySelector('.lightbox')) return true;
     if(dragEl) return true;
     var a=document.activeElement;
     if(a && (a.tagName==='INPUT'||a.tagName==='TEXTAREA')) return true;
@@ -718,7 +780,7 @@ var App = (function(){
     var html=heading
       +'<label class="field"><span>タイトル（任意・太字で表示）</span><input id="mTitle" type="text" placeholder="タイトル" value="'+esc(titleVal)+'"></label>'
       +'<label class="field"><span>本文</span><textarea id="mText" rows="4" placeholder="本文を入力（タイトルだけ・写真だけでもOK）">'+esc(textVal)+'</textarea></label>'
-      +'<label class="field"><span>写真・動画（任意）</span><input type="file" id="mFile" accept="image/*,video/*"></label>'
+      +'<label class="field"><span>写真・動画・PDF（任意）</span><input type="file" id="mFile" accept="image/*,video/*,application/pdf,.pdf"></label>'
       +'<div style="margin:-6px 0 12px;display:flex;gap:8px;flex-wrap:wrap">'
       +'<button type="button" class="ghost-btn" onclick="App.capture(\'image\')">📷 写真を撮る</button>'
       +'<button type="button" class="ghost-btn" onclick="App.capture(\'video\')">🎥 動画を撮る</button>'
@@ -750,11 +812,15 @@ var App = (function(){
   function onFile(e){
     var f=e.target.files[0]; if(!f){return;}
     var isVideo=/^video\//.test(f.type);
-    if(isVideo){
-      if(f.size>20*1024*1024){toast('動画が大きすぎます（20MBまで）。短く撮ってね');e.target.value='';return;}
+    var isPdf=(f.type==='application/pdf')||/\.pdf$/i.test(f.name);
+    if(isVideo||isPdf){
+      var limitMb=isVideo?20:15;
+      if(f.size>limitMb*1024*1024){toast((isVideo?'動画':'PDF')+'が大きすぎます（'+limitMb+'MBまで）');e.target.value='';return;}
       var reader=new FileReader();
       reader.onload=function(ev){
-        pendingMedia={data:ev.target.result.split(',')[1],mimeType:f.type||'video/mp4',filename:f.name||'video.mp4',kind:'video',previewUrl:URL.createObjectURL(f)};
+        pendingMedia=isPdf
+          ?{data:ev.target.result.split(',')[1],mimeType:'application/pdf',filename:f.name||'file.pdf',kind:'pdf',previewUrl:URL.createObjectURL(f)}
+          :{data:ev.target.result.split(',')[1],mimeType:f.type||'video/mp4',filename:f.name||'video.mp4',kind:'video',previewUrl:URL.createObjectURL(f)};
         removeExisting=false; renderMediaPreview();
       };
       reader.readAsDataURL(f);
@@ -786,10 +852,12 @@ var App = (function(){
     if(pendingMedia){
       el.innerHTML=(pendingMedia.kind==='video')
         ?'<video src="'+pendingMedia.previewUrl+'" controls style="width:100%;border-radius:10px"></video>'
-        :'<img src="'+pendingMedia.previewUrl+'" style="width:100%;border-radius:10px">';
+        :(pendingMedia.kind==='pdf')
+          ?'<iframe src="'+pendingMedia.previewUrl+'" style="width:100%;height:240px;border:1px solid #ddd;border-radius:10px"></iframe>'
+          :'<img src="'+pendingMedia.previewUrl+'" style="width:100%;border-radius:10px">';
     }else if(mode==='edit'&&editTarget&&editTarget.photoUrl&&!removeExisting){
-      el.innerHTML=(editTarget.mediaType==='video')
-        ?'<iframe src="'+esc(editTarget.photoUrl)+'" class="vid" style="height:200px"></iframe>'
+      el.innerHTML=(editTarget.mediaType==='video'||editTarget.mediaType==='pdf')
+        ?'<iframe src="'+esc(editTarget.photoUrl)+'" class="vid" style="height:240px"></iframe>'
         :'<img src="'+esc(editTarget.photoUrl)+'" referrerpolicy="no-referrer" style="width:100%;border-radius:10px">';
     }else{ el.innerHTML=''; }
     // 編集時：既存または新規の添付があれば「消す」ボタンを出す
@@ -830,7 +898,7 @@ var App = (function(){
     pickName:pickName, doLogin:doLogin, teacherLogin:teacherLogin, doTeacherLogin:doTeacherLogin,
     boardList:boardList, openBoard:openBoard, refreshBoard:refreshBoard, leaveBoard:leaveBoard,
     openPost:openPost, openEdit:openEdit, submitMedia:submitMedia, clearMedia:clearMedia,
-    addSection:addSection,
+    addSection:addSection, setSort:setSort,
     capture:capture,
     closeModal:closeModal,
     // 共有
@@ -994,16 +1062,22 @@ var Teacher=(function(){
         html+='<div class="print-card"><div class="pmeta">'+U.esc(r.subject)+' ／ '+U.esc(r.unit)+' ／ '+U.esc(r.date)+'</div>'
           +(r.title?'<div style="font-weight:700">'+U.esc(r.title)+'</div>':'')
           +(r.text?'<div>'+U.esc(r.text)+'</div>':'')
-          +(r.photoUrl?'<img src="'+U.esc(r.photoUrl)+'" referrerpolicy="no-referrer">':'')+'</div>';
+          +printMedia(r)+'</div>';
       });
       doPrint(html);
     }).catch(U.err);
+  }
+  function printMedia(c){
+    if(!c.photoUrl) return '';
+    if(c.mediaType==='video') return '<div class="pmeta">🎥 動画の添付あり（画面でご確認ください）</div>';
+    if(c.mediaType==='pdf')   return '<div class="pmeta">📄 PDFの添付あり（画面でご確認ください）</div>';
+    return '<img src="'+U.esc(c.photoUrl)+'" referrerpolicy="no-referrer">';
   }
   function printCard(author,c){
     return '<div class="print-card"><div class="pmeta">'+U.esc(author)+'（❤'+c.likeCount+' / 💬'+c.comments.length+'）</div>'
       +(c.title?'<div style="font-weight:700">'+U.esc(c.title)+'</div>':'')
       +(c.text?'<div>'+U.esc(c.text)+'</div>':'')
-      +(c.photoUrl?'<img src="'+U.esc(c.photoUrl)+'" referrerpolicy="no-referrer">':'')
+      +printMedia(c)
       +(c.comments.length?'<div class="pmeta" style="margin-top:4px">コメント: '+c.comments.map(function(x){return U.esc(x.author+'「'+x.text+'」');}).join(' / ')+'</div>':'')
       +'</div>';
   }

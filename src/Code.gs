@@ -789,15 +789,16 @@ function saveMedia_(media, board) {
   var sub = getOrCreateSubfolder_(folder, subName);
   var mime = media.mimeType || 'image/jpeg';
   var isVideo = (media.kind === 'video') || /^video\//.test(mime);
+  var isPdf = (media.kind === 'pdf') || mime === 'application/pdf';
   var bytes = Utilities.base64Decode(media.data);
-  var defName = (isVideo ? 'video_' : 'photo_') + Date.now() + (isVideo ? '.mp4' : '.jpg');
+  var defName = (isPdf ? 'file_' : isVideo ? 'video_' : 'photo_') + Date.now() + (isPdf ? '.pdf' : isVideo ? '.mp4' : '.jpg');
   var blob = Utilities.newBlob(bytes, mime, media.filename || defName);
   var file = sub.createFile(blob);
   file.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW);
   var id = file.getId();
-  if (isVideo) {
-    // 動画は preview（iframe）で再生する
-    return { fileId: id, url: 'https://drive.google.com/file/d/' + id + '/preview', mediaType: 'video' };
+  if (isVideo || isPdf) {
+    // 動画・PDFは preview（iframe）で表示する
+    return { fileId: id, url: 'https://drive.google.com/file/d/' + id + '/preview', mediaType: isPdf ? 'pdf' : 'video' };
   }
   return { fileId: id, url: 'https://drive.google.com/thumbnail?id=' + id + '&sz=w1000', mediaType: 'image' };
 }
@@ -825,7 +826,9 @@ function exportStudent(studentName) {
       return {
         boardTitle: bd.title || '(削除済みボード)',
         subject: bd.subject || '', unit: bd.unit || '', date: bd.date || '',
-        title: r.title || '', text: r.text, photoUrl: r.photoUrl, color: r.color, createdAt: toMs_(r.createdAt)
+        title: r.title || '', text: r.text, photoUrl: r.photoUrl,
+        mediaType: r.mediaType || (r.photoUrl ? 'image' : ''),
+        color: r.color, createdAt: toMs_(r.createdAt)
       };
     });
   return { studentName: studentName, reflections: refs };
