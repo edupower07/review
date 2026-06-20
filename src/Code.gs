@@ -9,6 +9,9 @@ var PROP_SPREADSHEET_ID = 'SPREADSHEET_ID';
 var PROP_FOLDER_ID = 'PHOTO_FOLDER_ID';
 var PROP_TEACHER_HASH = 'TEACHER_HASH';
 var PROP_TEACHER_SALT = 'TEACHER_SALT';
+var PROP_SCHEMA_VERSION = 'SCHEMA_VERSION';
+// SHEET_DEFS を変更したら必ずこの版数を上げる（次回アクセス時に1回だけ移行が走る）
+var SCHEMA_VERSION = '4';
 
 var SHEET_STUDENTS = 'Students';
 var SHEET_BOARDS = 'Boards';
@@ -21,8 +24,8 @@ var SHEET_DEFS = {};
 SHEET_DEFS[SHEET_STUDENTS] = ['number', 'name', 'salt', 'passwordHash', 'createdAt'];
 SHEET_DEFS[SHEET_BOARDS] = ['boardId', 'subject', 'unit', 'date', 'title', 'createdAt'];
 SHEET_DEFS[SHEET_SECTIONS] = ['sectionId', 'boardId', 'name', 'sortOrder', 'createdAt'];
-// 末尾の sectionId / mediaType / updatedAt は後から追加した列（既存データは移行で保持される）
-SHEET_DEFS[SHEET_REFLECTIONS] = ['reflectionId', 'boardId', 'studentName', 'text', 'photoUrl', 'photoFileId', 'color', 'sortOrder', 'createdAt', 'sectionId', 'mediaType', 'updatedAt'];
+// 末尾の sectionId / mediaType / updatedAt / pinned は後から追加した列（既存データは移行で保持）
+SHEET_DEFS[SHEET_REFLECTIONS] = ['reflectionId', 'boardId', 'studentName', 'text', 'photoUrl', 'photoFileId', 'color', 'sortOrder', 'createdAt', 'sectionId', 'mediaType', 'updatedAt', 'pinned'];
 SHEET_DEFS[SHEET_COMMENTS] = ['commentId', 'reflectionId', 'author', 'text', 'createdAt'];
 SHEET_DEFS[SHEET_LIKES] = ['reflectionId', 'studentName', 'createdAt'];
 
@@ -72,7 +75,13 @@ function ensureInit_() {
     }
   }
 
-  // 各シートを保証（ヘッダーが旧版・不一致なら作り直す）
+  // スキーマ版数が一致していれば、毎回のヘッダー再検証（全シートの読み込み）を省いて高速化する
+  if (props.getProperty(PROP_SCHEMA_VERSION) === SCHEMA_VERSION) {
+    _ssCache = ss;
+    return ss;
+  }
+
+  // 各シートを保証（ヘッダーが旧版・不一致なら作り直す）。版数が変わった時のみ実行。
   Object.keys(SHEET_DEFS).forEach(function (name) {
     var def = SHEET_DEFS[name];
     var sheet = ss.getSheetByName(name);
@@ -124,6 +133,8 @@ function ensureInit_() {
     var folder = DriveApp.createFolder('Manabase 写真');
     props.setProperty(PROP_FOLDER_ID, folder.getId());
   }
+  // 移行完了。次回以降は上のゲートでヘッダー再検証をスキップする。
+  props.setProperty(PROP_SCHEMA_VERSION, SCHEMA_VERSION);
   _ssCache = ss;
   return ss;
 }
@@ -511,17 +522,22 @@ function getBoardData(boardId, currentName) {
       sortOrder: Number(r.sortOrder) || 0,
       createdAt: toMs_(r.createdAt),
       updatedAt: toMs_(r.updatedAt),
+      pinned: r.pinned === true || r.pinned === 'true' || r.pinned === 1,
       likeCount: likeCount[r.reflectionId] || 0,
       likedByMe: !!likedByMe[r.reflectionId],
       comments: byRef[r.reflectionId] || []
     };
   });
-  cards.sort(function (a, b) {
-    if (a.sortOrder !== b.sortOrder) return a.sortOrder - b.sortOrder;
-    return (a.createdAt || 0) - (b.createdAt || 0);
-  });
+  cards.sort(cardCompare_);
 
   return { board: board, sections: getSections(boardId), cards: cards };
+}
+
+/** ピン留め優先 → 並び順 → 作成日時 の順で比較。 */
+function cardCompare_(a, b) {
+  if (!!a.pinned !== !!b.pinned) return a.pinned ? -1 : 1;
+  if (a.sortOrder !== b.sortOrder) return a.sortOrder - b.sortOrder;
+  return (a.createdAt || 0) - (b.createdAt || 0);
 }
 
 /**
@@ -529,22 +545,20 @@ function getBoardData(boardId, currentName) {
  * これが前回と変われば、クライアントは getBoardData を取り直して再描画する。
  */
 function getBoardSignature(boardId) {
-  var sig = '';
   var refCount = 0, maxMs = 0;
+  var refIds = {};
   readSheet_(SHEET_REFLECTIONS).forEach(function (r) {
     if (r.boardId !== boardId) return;
     refCount++;
+    refIds[r.reflectionId] = true;
     var u = toMs_(r.updatedAt) || toMs_(r.createdAt) || 0;
     if (u > maxMs) maxMs = u;
   });
   var secCount = readSheet_(SHEET_SECTIONS).filter(function (s) { return s.boardId === boardId; }).length;
   // いいね・コメントの増減も拾うため総数を含める（このボード分に限定）
-  var refIds = {};
-  readSheet_(SHEET_REFLECTIONS).forEach(function (r) { if (r.boardId === boardId) refIds[r.reflectionId] = true; });
   var likeCount = readSheet_(SHEET_LIKES).filter(function (l) { return refIds[l.reflectionId]; }).length;
   var comCount = readSheet_(SHEET_COMMENTS).filter(function (c) { return refIds[c.reflectionId]; }).length;
-  sig = refCount + '|' + maxMs + '|' + secCount + '|' + likeCount + '|' + comCount;
-  return sig;
+  return refCount + '|' + maxMs + '|' + secCount + '|' + likeCount + '|' + comCount;
 }
 
 /**
@@ -575,9 +589,17 @@ function postReflection(boardId, sectionId, studentName, password, text, color, 
   var now = new Date();
   // 列順は SHEET_DEFS[SHEET_REFLECTIONS] と一致させること
   getSheet_(SHEET_REFLECTIONS).appendRow([
-    id, boardId, studentName, text, url, fileId, color || '#fff7c0', maxOrder + 1, now, sectionId, mediaType, now
+    id, boardId, studentName, text, url, fileId, color || '#fff7c0', maxOrder + 1, now, sectionId, mediaType, now, false
   ]);
-  return getBoardData(boardId, studentName);
+  // 速度重視：作成したカード1枚だけを返す（クライアントは部分描画する）
+  return {
+    card: {
+      reflectionId: id, sectionId: sectionId, studentName: studentName, text: text,
+      photoUrl: url, mediaType: mediaType, color: color || '#fff7c0', sortOrder: maxOrder + 1,
+      createdAt: now.getTime(), updatedAt: now.getTime(), pinned: false,
+      likeCount: 0, likedByMe: false, comments: []
+    }
+  };
 }
 
 /**
@@ -615,8 +637,35 @@ function editReflection(reflectionId, studentName, password, teacherPassword, te
     sheet.getRange(r._row, def.indexOf('mediaType') + 1).setValue('');
   }
 
+  var now = new Date();
+  sheet.getRange(r._row, def.indexOf('updatedAt') + 1).setValue(now);
+  // 速度重視：変更後の値だけ返す（クライアントは該当カードを差し替える）
+  var newUrl = (media && media.data) ? readCell_(sheet, r._row, def, 'photoUrl') : (removeMedia ? '' : r.photoUrl);
+  var newType = (media && media.data) ? readCell_(sheet, r._row, def, 'mediaType') : (removeMedia ? '' : (r.mediaType || (r.photoUrl ? 'image' : '')));
+  return {
+    update: {
+      reflectionId: reflectionId, text: text, color: color || r.color,
+      photoUrl: newUrl, mediaType: newType, updatedAt: now.getTime()
+    }
+  };
+}
+
+function readCell_(sheet, row, def, key) {
+  return sheet.getRange(row, def.indexOf(key) + 1).getValue();
+}
+
+/** ピン留めの切り替え。本人 または 先生。 */
+function togglePin(reflectionId, studentName, password, teacherPassword) {
+  var sheet = getSheet_(SHEET_REFLECTIONS);
+  var r = readSheet_(SHEET_REFLECTIONS).filter(function (x) { return x.reflectionId === reflectionId; })[0];
+  if (!r) throw new Error('投稿が見つかりません。');
+  var allowed = isTeacher_(teacherPassword) || (r.studentName === studentName && verifyStudent_(studentName, password));
+  if (!allowed) throw new Error('ピン留めする権限がありません。');
+  var def = SHEET_DEFS[SHEET_REFLECTIONS];
+  var pinned = !(r.pinned === true || r.pinned === 'true' || r.pinned === 1);
+  sheet.getRange(r._row, def.indexOf('pinned') + 1).setValue(pinned);
   sheet.getRange(r._row, def.indexOf('updatedAt') + 1).setValue(new Date());
-  return getBoardData(r.boardId, studentName);
+  return { pinned: pinned };
 }
 
 /** 削除：本人 または 先生。 */

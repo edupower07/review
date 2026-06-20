@@ -41,18 +41,32 @@
     .ghost-btn:hover{background:#f6f1ea}
     .danger{color:var(--accent)}
 
-    /* ログイン（名前は横いっぱいに展開） */
-    .login{max-width:1100px;margin:5vh auto;background:var(--panel);border-radius:18px;padding:32px 36px;
-      box-shadow:0 10px 30px rgba(0,0,0,.06)}
-    .login h1{font-size:26px;margin:0 0 4px;text-align:center}
-    .login p{color:var(--muted);margin:0 0 22px;text-align:center}
-    .name-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(100px,1fr));gap:10px}
-    .name-btn{padding:12px 6px;border:1px solid var(--border);border-radius:12px;background:#fff;text-align:center;
-      font-size:15px;line-height:1.3;min-height:56px;display:flex;flex-direction:column;align-items:center;justify-content:center}
-    .name-btn:hover{background:#f6f1ea;border-color:var(--accent2)}
-    .name-btn .num{display:block;font-size:11px;color:var(--muted)}
+    /* ===== ログイン画面（ヒーロー） ===== */
+    body.login-mode{background:linear-gradient(135deg,#5b6cff 0%,#9b5cf6 38%,#e1568f 70%,#ff8a5b 100%);
+      background-attachment:fixed}
+    body.login-mode #appHeader{display:none}
+    body.login-mode main{max-width:none;padding:0 0 60px}
+    .login-hero{min-height:100vh;display:flex;flex-direction:column;align-items:center;justify-content:flex-start;padding:0 16px}
+    .hero-top{text-align:center;padding:7vh 10px 26px}
+    .hero-logo{margin:0;font-weight:900;letter-spacing:2px;line-height:1;
+      font-size:clamp(52px,10vw,108px);color:#fff;
+      text-shadow:0 1px 0 #cfd0ff,0 2px 0 #c3c4f7,0 3px 0 #b7b8ee,0 4px 0 #abace4,0 5px 0 #9fa0db,
+        0 6px 1px rgba(0,0,0,.10),0 0 6px rgba(0,0,0,.12),0 3px 6px rgba(0,0,0,.28),0 8px 18px rgba(0,0,0,.30)}
+    .hero-badge{font-size:clamp(40px,8vw,80px);filter:drop-shadow(0 6px 10px rgba(0,0,0,.3))}
+    .hero-sub{color:#fff;font-size:clamp(15px,2.2vw,20px);margin-top:14px;font-weight:600;
+      text-shadow:0 2px 6px rgba(0,0,0,.25)}
+    .login{width:100%;max-width:960px;margin:0 auto;background:rgba(255,255,255,.97);border-radius:24px;
+      padding:26px 30px 34px;box-shadow:0 26px 70px rgba(0,0,0,.30)}
+    .login h2{font-size:18px;margin:0 0 16px;text-align:center;color:var(--text)}
+    .name-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(104px,1fr));gap:12px}
+    .name-btn{padding:14px 8px;border:1px solid var(--border);border-radius:14px;background:#fff;text-align:center;
+      font-size:16px;line-height:1.3;min-height:62px;display:flex;flex-direction:column;align-items:center;justify-content:center;
+      transition:transform .08s,box-shadow .08s,border-color .08s}
+    .name-btn:hover{transform:translateY(-2px);box-shadow:0 8px 18px rgba(0,0,0,.12);border-color:var(--accent2)}
+    .name-btn .num{display:block;font-size:12px;color:var(--muted);margin-bottom:2px}
     .name-btn .lock{font-size:11px;color:#c0a000}
-    .login-foot{margin-top:24px;text-align:center}
+    .login-foot{margin-top:26px;text-align:center}
+    .login-foot .ghost-btn{background:#fff}
 
     .section-title{display:flex;align-items:center;justify-content:space-between;margin:8px 0 18px;gap:10px;flex-wrap:wrap}
     .section-title h2{margin:0;font-size:20px}
@@ -94,6 +108,9 @@
     .rec-dot{display:inline-block;width:10px;height:10px;border-radius:50%;background:#e8554e;margin-right:6px;animation:blink 1s infinite}
     @keyframes blink{50%{opacity:.2}}
     .card.dragging{opacity:.4}
+    .card.pinned{box-shadow:0 0 0 2px var(--accent2),0 4px 12px rgba(0,0,0,.14)}
+    .card .pin-badge{position:absolute;top:8px;left:8px;font-size:14px}
+    .card-actions .act.pinned{color:var(--accent2);font-weight:700}
     .card .author{font-weight:700;font-size:16px;margin-bottom:6px}
     .card .body{font-size:16px;white-space:pre-wrap;word-break:break-word;line-height:1.7}
     .card img.photo{width:100%;border-radius:10px;margin-top:10px;display:block}
@@ -243,30 +260,37 @@ var App = (function(){
   function login(){
     stopPolling();
     user=null; teacherPass=null; setCrumb(''); updateHeader();
-    spinner();
+    document.body.classList.add('login-mode');
+    // ヒーローは即時表示（読み込み待ちの体感を減らす）。名前一覧だけ後から差し込む。
+    view().innerHTML=
+      '<div class="login-hero"><div style="width:100%;max-width:960px">'
+      +'<div class="hero-top"><div class="hero-badge">📚</div>'
+      +'<h1 class="hero-logo">Manabase</h1>'
+      +'<div class="hero-sub">学びを、みんなで残そう。</div></div>'
+      +'<div class="login"><h2>自分の名前を選んでログイン</h2>'
+      +'<div id="nameGrid" class="name-grid"><div class="spinner" style="grid-column:1/-1">読み込み中…</div></div>'
+      +'<div class="login-foot" id="loginFoot"></div>'
+      +'</div></div></div>';
     run('getLoginInfo').then(function(info){
-      var html='<div class="login"><h1>📚 Manabase</h1><p>自分の名前を選んでログインしてね</p>';
+      var grid=$('nameGrid'); if(grid) grid.innerHTML='';
       if(!info.students.length){
-        html+='<div class="empty">まだ名簿が登録されていません。<br>先生用ログインから名簿を登録してください。</div>';
-      }else{
-        html+='<div class="name-grid" id="nameGrid"></div>';
-      }
-      html+='<div class="login-foot"><button class="ghost-btn" onclick="App.teacherLogin()">🧑‍🏫 先生用ログイン'
-        +(info.teacherSet?'':'（初回設定）')+'</button></div></div>';
-      view().innerHTML=html;
-      var grid=$('nameGrid');
-      if(grid){
+        if(grid) grid.innerHTML='<div class="empty" style="grid-column:1/-1">まだ名簿が登録されていません。<br>先生用ログインから名簿を登録してください。</div>';
+      }else if(grid){
         info.students.forEach(function(s){
           var btn=document.createElement('button');
           btn.className='name-btn';
-          btn.innerHTML=(s.number?'<span class="num">'+esc(s.number)+'</span>':'')+esc(s.name)
+          btn.innerHTML=(s.number?'<span class="num">'+esc(s.number)+'番</span>':'')+esc(s.name)
             +(s.hasPassword?'':'<span class="lock">★初回</span>');
           btn.addEventListener('click',function(){ pickName(s); });
           grid.appendChild(btn);
         });
       }
+      var foot=$('loginFoot');
+      if(foot) foot.innerHTML='<button class="ghost-btn" onclick="App.teacherLogin()">🧑‍🏫 先生用ログイン'
+        +(info.teacherSet?'':'（初回設定）')+'</button>';
     }).catch(err);
   }
+  function exitLoginMode(){ document.body.classList.remove('login-mode'); }
 
   function pickName(s){
     if(s.hasPassword){
@@ -289,7 +313,7 @@ var App = (function(){
     if(isNew){ if(pw!==$('pw2').value){toast('パスワードが一致しません');return;} }
     run('studentLogin',name,pw).then(function(r){
       user={name:name,password:pw}; teacherPass=null;
-      closeModal(); updateHeader();
+      closeModal(); exitLoginMode(); updateHeader();
       if(r.firstTime) toast('パスワードを設定しました！');
       boardList();
     }).catch(err);
@@ -304,7 +328,7 @@ var App = (function(){
   function doTeacherLogin(){
     var pw=$('tpw').value; if(!pw){toast('パスワードを入力してください');return;}
     run('teacherLogin',pw).then(function(r){
-      teacherPass=pw; user=null; closeModal(); updateHeader();
+      teacherPass=pw; user=null; closeModal(); exitLoginMode(); updateHeader();
       if(r.firstTime) toast('先生用パスワードを設定しました');
       Teacher.open();
     }).catch(err);
@@ -346,6 +370,11 @@ var App = (function(){
     current.board=data.board;
     current.sections=data.sections||[];
     current.cards=data.cards||[];
+  }
+  function clientCardCmp(a,b){
+    if(!!a.pinned!==!!b.pinned) return a.pinned?-1:1;
+    if(a.sortOrder!==b.sortOrder) return a.sortOrder-b.sortOrder;
+    return (a.createdAt||0)-(b.createdAt||0);
   }
   function openBoard(boardId){
     stopPolling();
@@ -404,7 +433,7 @@ var App = (function(){
     }
 
     var list=document.createElement('div'); list.className='card-list'; list.dataset.sectionId=sec.sectionId;
-    cards.forEach(function(c){ list.appendChild(cardEl(c)); });
+    cards.slice().sort(clientCardCmp).forEach(function(c){ list.appendChild(cardEl(c)); });
     colEl.appendChild(list);
 
     if(!sec._none && user){
@@ -420,7 +449,7 @@ var App = (function(){
 
   function cardEl(r){
     var d=document.createElement('div');
-    d.className='card'; d.style.background=r.color||'#fff7c0';
+    d.className='card'+(r.pinned?' pinned':''); d.style.background=r.color||'#fff7c0';
     d.setAttribute('draggable','true'); d.dataset.id=r.reflectionId;
     var canEdit = teacherPass || (user && user.name===r.studentName);
     var media='';
@@ -428,13 +457,15 @@ var App = (function(){
       if(r.mediaType==='video') media='<iframe class="vid" src="'+esc(r.photoUrl)+'" allow="autoplay" allowfullscreen></iframe>';
       else media='<img class="photo" src="'+esc(r.photoUrl)+'" loading="lazy" referrerpolicy="no-referrer" style="width:100%;border-radius:10px;margin-top:10px;display:block">';
     }
-    var html='<div class="author">'+esc(r.studentName)+'</div>'
+    var html=(r.pinned?'<div class="pin-badge">📌</div>':'')
+      +'<div class="author">'+esc(r.studentName)+'</div>'
       +(r.text?'<div class="body">'+esc(r.text)+'</div>':'')
       +media
       +'<div class="time">'+fmt(r.createdAt)+(r.updatedAt&&r.updatedAt>r.createdAt?'（編集済み）':'')+'</div>'
       +'<div class="card-actions">'
       +'<button class="act like'+(r.likedByMe?' liked':'')+'">❤ <span class="lc">'+r.likeCount+'</span></button>'
       +'<button class="act cbtn">💬 <span class="cc">'+r.comments.length+'</span></button>'
+      +(canEdit?'<button class="act pinbtn'+(r.pinned?' pinned':'')+'">📌 '+(r.pinned?'解除':'固定')+'</button>':'')
       +(canEdit?'<button class="act ebtn">✏ 編集</button>':'')
       +'</div><div class="comments hidden"></div>'
       +(canEdit?'<button class="del">🗑</button>':'');
@@ -443,19 +474,49 @@ var App = (function(){
     d.querySelector('.like').addEventListener('click',function(e){e.stopPropagation();like(r,d);});
     d.querySelector('.cbtn').addEventListener('click',function(e){e.stopPropagation();toggleComments(r,d);});
     if(canEdit){
+      d.querySelector('.pinbtn').addEventListener('click',function(e){e.stopPropagation();togglePinCard(r);});
       d.querySelector('.ebtn').addEventListener('click',function(e){e.stopPropagation();openEdit(r);});
       d.querySelector('.del').addEventListener('click',function(e){e.stopPropagation();delCard(r);});
     }
     return d;
   }
 
+  function findCard(id){ for(var i=0;i<current.cards.length;i++){ if(current.cards[i].reflectionId===id) return current.cards[i]; } return null; }
+  function cardNode(id){ return document.querySelector('.card[data-id="'+id+'"]'); }
+  function insertCardDom(card){
+    var board=$('board'); if(!board){ refreshBoard(); return; }
+    var list=board.querySelector('.card-list[data-section-id="'+(card.sectionId||'')+'"]');
+    if(!list){ refreshBoard(); return; }  // 既定セクションがサーバ側で新規作成された等 → 全体再取得
+    list.appendChild(cardEl(card));
+  }
+  function replaceCardDom(card){
+    var old=cardNode(card.reflectionId);
+    if(old && old.parentNode){ old.parentNode.replaceChild(cardEl(card),old); } else { refreshBoard(); }
+  }
+
+  // 楽観的いいね（先にUI更新→裏で保存）
   function like(r,d){
     if(!user){toast('いいねは生徒ログインが必要です');return;}
+    var nl=!r.likedByMe; r.likedByMe=nl; r.likeCount=Math.max(0,r.likeCount+(nl?1:-1));
+    var btn=d.querySelector('.like'); btn.classList.toggle('liked',nl); d.querySelector('.lc').textContent=r.likeCount;
+    lastSig=computeSig();
     run('toggleLike',r.reflectionId,user.name,user.password).then(function(res){
       r.likeCount=res.count; r.likedByMe=res.liked;
-      var btn=d.querySelector('.like'); btn.classList.toggle('liked',res.liked);
-      d.querySelector('.lc').textContent=res.count;
-    }).catch(err);
+      btn.classList.toggle('liked',res.liked); d.querySelector('.lc').textContent=res.count; lastSig=computeSig();
+    }).catch(function(e){
+      r.likedByMe=!nl; r.likeCount=Math.max(0,r.likeCount+(nl?-1:1));
+      btn.classList.toggle('liked',r.likedByMe); d.querySelector('.lc').textContent=r.likeCount; err(e);
+    });
+  }
+
+  // ピン留め（楽観的：先に並べ替えてから保存）
+  function togglePinCard(r){
+    if(!user && !teacherPass)return;
+    var np=!r.pinned; r.pinned=np; r.updatedAt=Date.now();
+    renderBoard();
+    run('togglePin',r.reflectionId,user?user.name:null,user?user.password:null,teacherPass)
+      .then(function(res){ r.pinned=res.pinned; lastSig=computeSig(); })
+      .catch(function(e){ r.pinned=!np; renderBoard(); err(e); });
   }
   function toggleComments(r,d){
     var box=d.querySelector('.comments');
@@ -486,8 +547,11 @@ var App = (function(){
   }
   function delCard(r){
     if(!confirm('この投稿を削除しますか？'))return;
+    var node=cardNode(r.reflectionId); if(node)node.remove();
+    current.cards=current.cards.filter(function(c){return c.reflectionId!==r.reflectionId;});
+    lastSig=computeSig();
     run('deleteReflection',r.reflectionId,user?user.name:null,user?user.password:null,teacherPass)
-      .then(function(){ openBoard(current.board.boardId); }).catch(err);
+      .catch(function(e){ err(e); refreshBoard(); });
   }
 
   // -------- ドラッグ＆ドロップ（セクション間移動・並べ替え） --------
@@ -674,14 +738,21 @@ var App = (function(){
     var hasMediaAfter = pendingMedia || (mode==='edit'&&editTarget&&editTarget.photoUrl&&!removeExisting);
     if(!text && !hasMediaAfter){toast('テキストか写真・動画を入れてください');return;}
     var btn=$('mSubmit'); btn.disabled=true; btn.textContent='送信中…';
-    var done=function(data){ applyBoardData(data); closeModal(); renderBoard(); toast(mode==='edit'?'保存しました':'投稿しました！'); };
     var fail=function(e){err(e);btn.disabled=false;btn.textContent='送信';};
     if(mode==='edit'){
       run('editReflection',editTarget.reflectionId,user?user.name:null,user?user.password:null,teacherPass,text,pickedColor,pendingMedia,removeExisting)
-        .then(done).catch(fail);
+        .then(function(res){
+          var u=res.update, card=findCard(u.reflectionId);
+          if(card){ card.text=u.text; card.color=u.color; card.photoUrl=u.photoUrl; card.mediaType=u.mediaType; card.updatedAt=u.updatedAt; replaceCardDom(card); }
+          else refreshBoard();
+          closeModal(); toast('保存しました'); lastSig=computeSig();
+        }).catch(fail);
     }else{
       run('postReflection',current.board.boardId,postSectionId,user.name,user.password,text,pickedColor,pendingMedia)
-        .then(done).catch(fail);
+        .then(function(res){
+          var card=res.card; current.cards.push(card); insertCardDom(card);
+          closeModal(); toast('投稿しました！'); lastSig=computeSig();
+        }).catch(fail);
     }
   }
 
