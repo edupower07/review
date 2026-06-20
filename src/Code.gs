@@ -311,13 +311,24 @@ function rowToBoard_(r) {
     unit: r.unit,
     date: fmtDate_(r.date),
     title: r.title,
-    createdAt: r.createdAt
+    createdAt: toMs_(r.createdAt)
   };
 }
 function fmtDate_(d) {
   if (d instanceof Date) return Utilities.formatDate(d, 'Asia/Tokyo', 'yyyy-MM-dd');
   if (d == null) return '';
   return String(d);
+}
+/**
+ * 日時をクライアントへ返すための数値(エポックms)に変換します。
+ * google.script.run は Date オブジェクトを含む戻り値をうまくシリアライズできず
+ * null になる場合があるため、必ず数値に変換してから返します。
+ */
+function toMs_(d) {
+  if (d instanceof Date) return d.getTime();
+  if (d == null || d === '') return null;
+  var t = new Date(d).getTime();
+  return isNaN(t) ? null : t;
 }
 
 function getBoard(boardId) {
@@ -377,7 +388,7 @@ function getBoardData(boardId, currentName) {
   var byRef = {};
   comments.forEach(function (c) {
     (byRef[c.reflectionId] = byRef[c.reflectionId] || []).push({
-      commentId: c.commentId, author: c.author, text: c.text, createdAt: c.createdAt
+      commentId: c.commentId, author: c.author, text: c.text, createdAt: toMs_(c.createdAt)
     });
   });
   Object.keys(byRef).forEach(function (k) {
@@ -392,7 +403,7 @@ function getBoardData(boardId, currentName) {
       photoUrl: r.photoUrl,
       color: r.color,
       sortOrder: Number(r.sortOrder) || 0,
-      createdAt: r.createdAt,
+      createdAt: toMs_(r.createdAt),
       likeCount: likeCount[r.reflectionId] || 0,
       likedByMe: !!likedByMe[r.reflectionId],
       comments: byRef[r.reflectionId] || []
@@ -492,7 +503,7 @@ function addComment(reflectionId, author, password, text) {
   return readSheet_(SHEET_COMMENTS)
     .filter(function (c) { return c.reflectionId === reflectionId; })
     .sort(function (a, b) { return new Date(a.createdAt) - new Date(b.createdAt); })
-    .map(function (c) { return { commentId: c.commentId, author: c.author, text: c.text, createdAt: c.createdAt }; });
+    .map(function (c) { return { commentId: c.commentId, author: c.author, text: c.text, createdAt: toMs_(c.createdAt) }; });
 }
 
 // ============================ 写真 ============================
@@ -531,7 +542,7 @@ function exportStudent(studentName) {
       return {
         boardTitle: bd.title || '(削除済みボード)',
         subject: bd.subject || '', unit: bd.unit || '', date: bd.date || '',
-        text: r.text, photoUrl: r.photoUrl, color: r.color, createdAt: r.createdAt
+        text: r.text, photoUrl: r.photoUrl, color: r.color, createdAt: toMs_(r.createdAt)
       };
     });
   return { studentName: studentName, reflections: refs };

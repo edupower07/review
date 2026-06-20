@@ -172,7 +172,7 @@ var App = (function(){
   function spinner(){ var b=$('errBanner'); if(b)b.classList.add('hidden'); view().innerHTML='<div class="spinner">読み込み中…</div>'; }
   function setCrumb(t){ $('crumb').textContent = t ? '/ '+t : ''; }
   function toast(m){var t=$('toast');t.textContent=m;t.classList.remove('hidden');clearTimeout(t._t);t._t=setTimeout(function(){t.classList.add('hidden');},2600);}
-  function fmt(d){var x=new Date(d);if(isNaN(x))return '';return (x.getMonth()+1)+'/'+x.getDate()+' '+('0'+x.getHours()).slice(-2)+':'+('0'+x.getMinutes()).slice(-2);}
+  function fmt(d){if(d==null||d==='')return '';var x=new Date(d);if(isNaN(x))return '';return (x.getMonth()+1)+'/'+x.getDate()+' '+('0'+x.getHours()).slice(-2)+':'+('0'+x.getMinutes()).slice(-2);}
   function run(fn){var a=[].slice.call(arguments,1);return new Promise(function(res,rej){var r=google.script.run.withSuccessHandler(res).withFailureHandler(rej);r[fn].apply(r,a);});}
   function errMsg(e){return (e&&e.message)?e.message:(e==null?'不明なエラー':String(e));}
   function err(e){
@@ -286,6 +286,7 @@ var App = (function(){
   function boardList(){
     current.board=null; setCrumb('ボード一覧'); spinner();
     run('getBoards').then(function(boards){
+      boards=boards||[];
       current.boards=boards;
       var html='<div class="section-title"><h2>ボード</h2></div>';
       if(!boards.length){ html+='<div class="empty">まだボードがありません。<br>先生がボードを作るとここに出ます。</div>'; }
@@ -533,6 +534,7 @@ var Teacher=(function(){
   function boards(){
     U.spinner();
     U.run('getBoards').then(function(list){
+      list=list||[];
       var today=new Date().toISOString().slice(0,10);
       var html=tabsBar()+'<div class="section-title"><h2>ボードを作成</h2></div>';
       html+='<div class="row-form">'
