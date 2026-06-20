@@ -107,10 +107,6 @@
     .card{width:100%;border-radius:14px;padding:12px 12px 10px;box-shadow:0 2px 8px rgba(0,0,0,.10);position:relative;
       background:#fff7c0;cursor:grab}
     .card .vid{width:100%;height:160px;border:0;border-radius:10px;margin-top:8px;display:block}
-    /* カメラ */
-    #camVid{width:100%;border-radius:12px;background:#000;max-height:60vh}
-    .rec-dot{display:inline-block;width:10px;height:10px;border-radius:50%;background:#e8554e;margin-right:6px;animation:blink 1s infinite}
-    @keyframes blink{50%{opacity:.2}}
     .card.dragging{opacity:.4}
     .card.pinned{box-shadow:0 0 0 2px var(--accent2),0 3px 10px rgba(0,0,0,.14)}
     .pin-strip{font-size:11px;color:var(--accent2);font-weight:700;margin:-2px 0 6px}
@@ -213,6 +209,13 @@
 // ============================================================
 var App = (function(){
   var COLORS = ['#fff7c0','#ffd1dc','#c8f0d0','#cfe3ff','#e8d6ff','#ffe2bf','#ffffff'];
+  // セクションの色分け用パレット（先生が選ぶ）
+  var SECTION_COLORS = ['#e8554e','#e08a3c','#d9a400','#2faf6b','#2796a8','#3f7fd6','#8c5bd0','#d24b8c','#7a8b3c','#6a7a8c'];
+  function hexToRgba(hex,a){
+    hex=String(hex||'').replace('#',''); if(hex.length===3)hex=hex.replace(/./g,'$&$&');
+    var n=parseInt(hex,16); if(isNaN(n))return 'transparent';
+    return 'rgba('+((n>>16)&255)+','+((n>>8)&255)+','+(n&255)+','+a+')';
+  }
   // 教科ごとの色（ボードの色分け用）
   var SUBJECT_COLORS = {
     '国語':'#e8554e','算数・数学':'#3f7fd6','理科':'#2faf6b','社会':'#c8862a',
@@ -434,11 +437,17 @@ var App = (function(){
     var colEl=document.createElement('div');
     colEl.className='section-col'; colEl.dataset.sectionId=sec.sectionId;
 
-    // 固定ヘッダー：＋ボタンを上、その下にタイトル（スクロールしても動かない）
+    // セクション色（先生が設定）。色があれば上部にアクセントバー＋ヘッダーを淡く着色。
+    var color=sec.color||'';
+    if(color){ colEl.style.borderTop='5px solid '+color; }
+
+    // 固定ヘッダー：タイトルが上、その下に＋ボタン（スクロールしても動かない）
     var head=document.createElement('div'); head.className='col-header';
+    if(color){ head.style.background=hexToRgba(color,0.16); }
     var tools='';
     if(isTeacher && !sec._none){
-      tools='<span class="sec-tools"><button title="名前を変更" data-act="rename">✏</button>'
+      tools='<span class="sec-tools"><button title="色を変える" data-act="color">🎨</button>'
+        +'<button title="名前を変更" data-act="rename">✏</button>'
         +'<button title="削除" data-act="del">🗑</button></span>';
     }
     var addBtn = (!sec._none && user) ? '<button class="add-bar" data-act="add">＋ 投稿</button>' : '';
@@ -448,6 +457,7 @@ var App = (function(){
     colEl.appendChild(head);
     if(addBtn) head.querySelector('[data-act="add"]').addEventListener('click',function(){ openPost(sec.sectionId); });
     if(isTeacher && !sec._none){
+      head.querySelector('[data-act="color"]').addEventListener('click',function(){ pickSectionColor(sec); });
       head.querySelector('[data-act="rename"]').addEventListener('click',function(){ renameSection(sec); });
       head.querySelector('[data-act="del"]').addEventListener('click',function(){ deleteSection(sec); });
     }
@@ -622,7 +632,23 @@ var App = (function(){
   // -------- セクション管理（先生） --------
   function addSection(){
     var name=prompt('新しいセクション名'); if(name==null)return; name=name.trim(); if(!name)return;
-    run('createSection',current.board.boardId,name,teacherPass).then(function(){ refreshBoard(); }).catch(err);
+    // 既存セクション数で色を順番に割り当て（あとから🎨で変更可）
+    var color=SECTION_COLORS[current.sections.length % SECTION_COLORS.length];
+    run('createSection',current.board.boardId,name,teacherPass,color).then(function(){ refreshBoard(); }).catch(err);
+  }
+  function pickSectionColor(sec){
+    var sw=SECTION_COLORS.map(function(c){
+      return '<div class="swatch'+(c===sec.color?' active':'')+'" style="background:'+c+'" data-c="'+c+'"></div>';
+    }).join('')
+    +'<div class="swatch'+(!sec.color?' active':'')+'" style="background:#fff;border:1px solid #ddd;font-size:11px;display:flex;align-items:center;justify-content:center" data-c="">なし</div>';
+    modal('<h3>「'+esc(sec.name)+'」の色</h3><div class="color-row" id="secColors">'+sw+'</div>'
+      +'<div class="modal-actions"><button class="ghost-btn" onclick="App.closeModal()">閉じる</button></div>');
+    [].forEach.call($('secColors').children,function(el){
+      el.addEventListener('click',function(){
+        var c=el.dataset.c;
+        run('setSectionColor',sec.sectionId,c,teacherPass).then(function(){ closeModal(); refreshBoard(); }).catch(err);
+      });
+    });
   }
   function renameSection(sec){
     var name=prompt('セクション名を変更',sec.name); if(name==null)return; name=name.trim(); if(!name)return;
@@ -643,7 +669,7 @@ var App = (function(){
     return current.cards.length+'|'+maxMs+'|'+current.sections.length+'|'+likes+'|'+coms;
   }
   function busy(){
-    if($('modalRoot').innerHTML || document.getElementById('camOverlay')) return true;
+    if($('modalRoot').innerHTML) return true;
     if(dragEl) return true;
     var a=document.activeElement;
     if(a && (a.tagName==='INPUT'||a.tagName==='TEXTAREA')) return true;
@@ -693,7 +719,13 @@ var App = (function(){
       +'<label class="field"><span>タイトル（任意・太字で表示）</span><input id="mTitle" type="text" placeholder="タイトル" value="'+esc(titleVal)+'"></label>'
       +'<label class="field"><span>本文</span><textarea id="mText" rows="4" placeholder="本文を入力（タイトルだけ・写真だけでもOK）">'+esc(textVal)+'</textarea></label>'
       +'<label class="field"><span>写真・動画（任意）</span><input type="file" id="mFile" accept="image/*,video/*"></label>'
-      +'<div style="margin:-6px 0 12px"><button type="button" class="ghost-btn" onclick="App.openCamera()">📷 カメラを起動</button></div>'
+      +'<div style="margin:-6px 0 12px;display:flex;gap:8px;flex-wrap:wrap">'
+      +'<button type="button" class="ghost-btn" onclick="App.capture(\'image\')">📷 写真を撮る</button>'
+      +'<button type="button" class="ghost-btn" onclick="App.capture(\'video\')">🎥 動画を撮る</button>'
+      +'</div>'
+      // 端末標準のカメラを直接起動（capture属性）。GASのiframe内でも動くため getUserMedia より確実。
+      +'<input type="file" id="mCapImg" accept="image/*" capture="environment" class="hidden">'
+      +'<input type="file" id="mCapVid" accept="video/*" capture="environment" class="hidden">'
       +'<div id="mPrev" style="margin-bottom:12px"></div>'
       +(mode==='edit'?'<div id="mRemoveWrap" style="margin-bottom:12px"></div>':'')
       +'<div class="color-row" id="cRow"></div>'
@@ -704,7 +736,15 @@ var App = (function(){
     row.innerHTML=COLORS.map(function(c){return '<div class="swatch'+(c===pickedColor?' active':'')+'" style="background:'+c+';'+(c==='#ffffff'?'border:1px solid #ddd':'')+'" data-c="'+c+'"></div>';}).join('');
     [].forEach.call(row.children,function(sw){sw.addEventListener('click',function(){pickedColor=sw.dataset.c;[].forEach.call(row.children,function(x){x.classList.remove('active');});sw.classList.add('active');});});
     $('mFile').addEventListener('change',onFile);
+    $('mCapImg').addEventListener('change',onFile);
+    $('mCapVid').addEventListener('change',onFile);
     renderMediaPreview();
+  }
+
+  // 端末のカメラで撮影（写真／動画）。capture属性付きファイル入力を起動するだけ。
+  function capture(kind){
+    var el=$(kind==='video'?'mCapVid':'mCapImg');
+    if(el){ el.value=''; el.click(); }
   }
 
   function onFile(e){
@@ -785,78 +825,13 @@ var App = (function(){
     }
   }
 
-  // -------- カメラ（getUserMedia：写真撮影・動画録画） --------
-  var camStream=null, camRecorder=null, camChunks=[], camFacing='user', camRecording=false;
-  function openCamera(){
-    if(!navigator.mediaDevices||!navigator.mediaDevices.getUserMedia){toast('この端末ではカメラを使えません');return;}
-    var ov=document.createElement('div'); ov.id='camOverlay';
-    ov.innerHTML='<div class="modal"><div class="modal-card" style="max-width:600px">'
-      +'<h3>カメラ</h3>'
-      +'<video id="camVid" autoplay playsinline muted></video>'
-      +'<div id="camStatus" style="margin:8px 0;color:var(--muted);font-size:13px"></div>'
-      +'<div class="modal-actions" style="justify-content:space-between;flex-wrap:wrap;gap:8px">'
-      +'<button class="ghost-btn" onclick="App.camSwitch()">🔄 切替</button>'
-      +'<span style="display:flex;gap:8px;flex-wrap:wrap">'
-      +'<button class="primary-btn" id="camPhoto" onclick="App.capturePhoto()">📷 写真</button>'
-      +'<button class="ghost-btn" id="camRec" onclick="App.toggleRec()">⏺ 録画</button>'
-      +'<button class="ghost-btn" onclick="App.closeCamera()">閉じる</button>'
-      +'</span></div></div></div>';
-    document.body.appendChild(ov);
-    startCam();
-  }
-  function startCam(){
-    stopCamStream();
-    navigator.mediaDevices.getUserMedia({video:{facingMode:camFacing},audio:true}).then(function(st){
-      camStream=st; var v=$('camVid'); if(v) v.srcObject=st;
-    }).catch(function(e){ toast('カメラを起動できません: '+(e.message||e)); closeCamera(); });
-  }
-  function camSwitch(){ camFacing=(camFacing==='user')?'environment':'user'; startCam(); }
-  function capturePhoto(){
-    var v=$('camVid'); if(!v||!v.videoWidth){toast('準備中です');return;}
-    var maxDim=1280, w=v.videoWidth, h=v.videoHeight;
-    if(w>h&&w>maxDim){h=Math.round(h*maxDim/w);w=maxDim;} else if(h>=w&&h>maxDim){w=Math.round(w*maxDim/h);h=maxDim;}
-    var cv=document.createElement('canvas');cv.width=w;cv.height=h;cv.getContext('2d').drawImage(v,0,0,w,h);
-    var dataUrl=cv.toDataURL('image/jpeg',0.85);
-    pendingMedia={data:dataUrl.split(',')[1],mimeType:'image/jpeg',filename:'camera_'+Date.now()+'.jpg',kind:'image',previewUrl:dataUrl};
-    removeExisting=false; closeCamera(); renderMediaPreview(); toast('写真を撮影しました');
-  }
-  function toggleRec(){
-    if(!camStream){return;}
-    if(!camRecording){
-      camChunks=[];
-      var opts={}; try{ if(MediaRecorder.isTypeSupported('video/webm;codecs=vp9'))opts={mimeType:'video/webm;codecs=vp9'}; else if(MediaRecorder.isTypeSupported('video/webm'))opts={mimeType:'video/webm'}; }catch(e){}
-      try{ camRecorder=new MediaRecorder(camStream,opts); }catch(e){ toast('録画を開始できません');return; }
-      camRecorder.ondataavailable=function(ev){ if(ev.data&&ev.data.size)camChunks.push(ev.data); };
-      camRecorder.onstop=function(){
-        var blob=new Blob(camChunks,{type:(camRecorder.mimeType||'video/webm')});
-        if(blob.size>20*1024*1024){toast('動画が長すぎます（20MBまで）');return;}
-        var reader=new FileReader();
-        reader.onload=function(ev){
-          pendingMedia={data:ev.target.result.split(',')[1],mimeType:blob.type,filename:'camera_'+Date.now()+'.webm',kind:'video',previewUrl:URL.createObjectURL(blob)};
-          removeExisting=false; closeCamera(); renderMediaPreview(); toast('動画を撮影しました');
-        };
-        reader.readAsDataURL(blob);
-      };
-      camRecorder.start(); camRecording=true;
-      $('camRec').innerHTML='■ 停止'; $('camStatus').innerHTML='<span class="rec-dot"></span>録画中…';
-    }else{
-      camRecording=false; try{ camRecorder.stop(); }catch(e){}
-    }
-  }
-  function stopCamStream(){ if(camStream){ camStream.getTracks().forEach(function(t){t.stop();}); camStream=null; } }
-  function closeCamera(){
-    if(camRecording){ camRecording=false; try{camRecorder.stop();}catch(e){} }
-    stopCamStream();
-    var ov=document.getElementById('camOverlay'); if(ov) ov.remove();
-  }
-
   return {
     init:login, home:home, login:login, logout:logout,
     pickName:pickName, doLogin:doLogin, teacherLogin:teacherLogin, doTeacherLogin:doTeacherLogin,
     boardList:boardList, openBoard:openBoard, refreshBoard:refreshBoard, leaveBoard:leaveBoard,
     openPost:openPost, openEdit:openEdit, submitMedia:submitMedia, clearMedia:clearMedia,
     addSection:addSection,
-    openCamera:openCamera, camSwitch:camSwitch, capturePhoto:capturePhoto, toggleRec:toggleRec, closeCamera:closeCamera,
+    capture:capture,
     closeModal:closeModal,
     // 共有
     _:{run:run,esc:esc,toast:toast,spinner:spinner,view:view,setCrumb:setCrumb,err:err,modal:modal,closeModal:closeModal,fmt:fmt,
@@ -923,7 +898,7 @@ var Teacher=(function(){
   // -------- ボード作成 --------
   function boards(){
     U.spinner();
-    U.run('getBoards').then(function(list){
+    U.run('getBoards', true).then(function(list){
       list=list||[];
       var today=new Date().toISOString().slice(0,10);
       var html=tabsBar()+'<div class="section-title"><h2>ボードを作成</h2></div>';
@@ -934,12 +909,21 @@ var Teacher=(function(){
         +'<label class="field"><span>タイトル（任意）</span><input id="bTitle" placeholder="未入力なら単元名"></label>'
         +'<button class="primary-btn" onclick="Teacher.createBoard()">作成</button></div>';
       if(list.length){
-        html+='<div class="section-title"><h2>作成済みボード</h2></div><table><tr><th>教科</th><th>単元</th><th>日付</th><th>タイトル</th><th>操作</th></tr>';
+        html+='<div class="section-title"><h2>作成済みボード</h2></div>'
+          +'<p style="color:var(--muted);font-size:13px;margin:-8px 0 12px">「非表示」にすると児童のボード一覧から消えますが、データは残り、先生は印刷も再表示もできます。</p>'
+          +'<table><tr><th>教科</th><th>単元</th><th>日付</th><th>タイトル</th><th>状態</th><th>操作</th></tr>';
         list.forEach(function(b){
           var id=JSON.stringify(b.boardId).replace(/"/g,'&quot;');
           var dot='<span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:'+U.subjColor(b.subject)+';margin-right:6px"></span>';
-          html+='<tr><td>'+dot+U.esc(b.subject)+'</td><td>'+U.esc(b.unit)+'</td><td>'+U.esc(b.date)+'</td><td>'+U.esc(b.title)+'</td>'
+          var rowStyle=b.archived?' style="opacity:.55"':'';
+          var state=b.archived?'<span style="color:var(--muted)">🙈 非表示</span>':'<span style="color:#2faf6b">表示中</span>';
+          var toggle=b.archived
+            ? '<button class="ghost-btn" onclick="Teacher.setArchived('+id+',false)">👁 再表示</button>'
+            : '<button class="ghost-btn" onclick="Teacher.setArchived('+id+',true)">🙈 非表示</button>';
+          html+='<tr'+rowStyle+'><td>'+dot+U.esc(b.subject)+'</td><td>'+U.esc(b.unit)+'</td><td>'+U.esc(b.date)+'</td><td>'+U.esc(b.title)+'</td>'
+            +'<td>'+state+'</td>'
             +'<td><button class="ghost-btn" onclick="App.openBoard('+id+')">開く</button> '
+            +toggle+' '
             +'<button class="ghost-btn danger" onclick="Teacher.delBoard('+id+')">削除</button></td></tr>';
         });
         html+='</table>';
@@ -954,11 +938,15 @@ var Teacher=(function(){
     U.run('createBoard',sub,unit,date,title).then(function(){U.toast('作成しました');boards();}).catch(U.err);
   }
   function delBoard(id){ if(!confirm('このボードと投稿・写真をすべて削除します。よろしいですか？'))return; U.run('deleteBoard',id).then(function(){U.toast('削除しました');boards();}).catch(U.err); }
+  function setArchived(id, archived){
+    U.run('setBoardArchived',id,archived,U.getTeacherPass())
+      .then(function(){U.toast(archived?'児童の一覧から非表示にしました':'再表示しました');boards();}).catch(U.err);
+  }
 
   // -------- 確認・出力 --------
   function exportTab(){
     U.spinner();
-    Promise.all([U.run('getBoards'),U.run('getStudents')]).then(function(res){
+    Promise.all([U.run('getBoards', true),U.run('getStudents')]).then(function(res){
       var bs=res[0], sts=res[1];
       var html=tabsBar()+'<div class="section-title"><h2>確認・出力</h2></div>';
       html+='<div class="row-form"><label class="field"><span>ボード全体を出力</span><select id="exB">'
@@ -982,7 +970,18 @@ var Teacher=(function(){
       var b=data.board;
       var html='<div class="print-head"><h1>'+U.esc(b.title)+'</h1>'
         +'<div>'+U.esc(b.subject)+' ／ '+U.esc(b.unit)+' ／ '+U.esc(b.date)+' ／ 投稿数 '+data.cards.length+'件</div></div>';
-      data.cards.forEach(function(c){ html+=printCard(c.studentName,c); });
+      // セクションごとに見出しを付けて出力（画面と同じ並び）
+      var bySec={};
+      data.cards.forEach(function(c){ (bySec[c.sectionId||'']=bySec[c.sectionId||'']||[]).push(c); });
+      var cols=(data.sections||[]).slice();
+      if((bySec['']||[]).length){ cols.push({sectionId:'',name:'（未分類）'}); }
+      cols.forEach(function(sec){
+        var cards=bySec[sec.sectionId||'']||[];
+        if(!cards.length) return;
+        html+='<div class="print-group"><h2>'+U.esc(sec.name)+'（'+cards.length+'件）</h2>';
+        cards.forEach(function(c){ html+=printCard(c.studentName,c); });
+        html+='</div>';
+      });
       doPrint(html);
     }).catch(U.err);
   }
@@ -1014,7 +1013,7 @@ var Teacher=(function(){
   }
 
   return {open:open,go:go,addStudent:addStudent,bulkAdd:bulkAdd,removeStudent:removeStudent,resetPw:resetPw,
-    createBoard:createBoard,delBoard:delBoard,viewBoard:viewBoard,printBoard:printBoard,printStudent:printStudent};
+    createBoard:createBoard,delBoard:delBoard,setArchived:setArchived,viewBoard:viewBoard,printBoard:printBoard,printStudent:printStudent};
 })();
 
 window.onload=App.init;

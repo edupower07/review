@@ -11,7 +11,7 @@ var PROP_TEACHER_HASH = 'TEACHER_HASH';
 var PROP_TEACHER_SALT = 'TEACHER_SALT';
 var PROP_SCHEMA_VERSION = 'SCHEMA_VERSION';
 // SHEET_DEFS を変更したら必ずこの版数を上げる（次回アクセス時に1回だけ移行が走る）
-var SCHEMA_VERSION = '5';
+var SCHEMA_VERSION = '6';
 
 var SHEET_STUDENTS = 'Students';
 var SHEET_BOARDS = 'Boards';
@@ -22,8 +22,10 @@ var SHEET_LIKES = 'Likes';
 
 var SHEET_DEFS = {};
 SHEET_DEFS[SHEET_STUDENTS] = ['number', 'name', 'salt', 'passwordHash', 'createdAt'];
-SHEET_DEFS[SHEET_BOARDS] = ['boardId', 'subject', 'unit', 'date', 'title', 'createdAt'];
-SHEET_DEFS[SHEET_SECTIONS] = ['sectionId', 'boardId', 'name', 'sortOrder', 'createdAt'];
+// 末尾の archived は後から追加した列（true で児童のボード一覧から非表示。データは保持）
+SHEET_DEFS[SHEET_BOARDS] = ['boardId', 'subject', 'unit', 'date', 'title', 'createdAt', 'archived'];
+// 末尾の color は後から追加した列（セクションの色分け用）
+SHEET_DEFS[SHEET_SECTIONS] = ['sectionId', 'boardId', 'name', 'sortOrder', 'createdAt', 'color'];
 // 末尾の sectionId / mediaType / updatedAt / pinned / title は後から追加した列（既存データは移行で保持）
 SHEET_DEFS[SHEET_REFLECTIONS] = ['reflectionId', 'boardId', 'studentName', 'text', 'photoUrl', 'photoFileId', 'color', 'sortOrder', 'createdAt', 'sectionId', 'mediaType', 'updatedAt', 'pinned', 'title'];
 SHEET_DEFS[SHEET_COMMENTS] = ['commentId', 'reflectionId', 'author', 'text', 'createdAt'];
@@ -351,8 +353,13 @@ function resetStudentPassword(name) {
 
 // ============================ ボード ============================
 
-function getBoards() {
+/**
+ * ボード一覧。includeArchived=true で非表示（アーカイブ）ボードも含めます。
+ * 児童側（boardList）は false で呼ぶため、非表示ボードは一覧に出ません。
+ */
+function getBoards(includeArchived) {
   var boards = readSheet_(SHEET_BOARDS).map(rowToBoard_);
+  if (!includeArchived) boards = boards.filter(function (b) { return !b.archived; });
   boards.sort(function (a, b) { return new Date(b.createdAt) - new Date(a.createdAt); });
   return boards;
 }
@@ -364,8 +371,19 @@ function rowToBoard_(r) {
     unit: r.unit,
     date: fmtDate_(r.date),
     title: r.title,
-    createdAt: toMs_(r.createdAt)
+    createdAt: toMs_(r.createdAt),
+    archived: r.archived === true || r.archived === 'true' || r.archived === 1
   };
+}
+
+/** ボードの非表示（アーカイブ）切り替え（先生のみ）。データは消さず一覧から隠すだけ。 */
+function setBoardArchived(boardId, archived, teacherPassword) {
+  if (!isTeacher_(teacherPassword)) throw new Error('この操作は先生のみ可能です。');
+  var sheet = getSheet_(SHEET_BOARDS);
+  var b = readSheet_(SHEET_BOARDS).filter(function (r) { return r.boardId === boardId; })[0];
+  if (!b) throw new Error('ボードが見つかりません。');
+  sheet.getRange(b._row, SHEET_DEFS[SHEET_BOARDS].indexOf('archived') + 1).setValue(!!archived);
+  return true;
 }
 function fmtDate_(d) {
   if (d instanceof Date) return Utilities.formatDate(d, 'Asia/Tokyo', 'yyyy-MM-dd');
@@ -399,12 +417,12 @@ function createBoard(subject, unit, date, title) {
   title = String(title || '').trim();
   if (!title) title = unit;
   var id = genId_('b');
-  // 列順は SHEET_DEFS[SHEET_BOARDS] と一致させること（boardId, subject, unit, date, title, createdAt）
-  getSheet_(SHEET_BOARDS).appendRow([id, subject, unit, "'" + date, title, new Date()]);
+  // 列順は SHEET_DEFS[SHEET_BOARDS] と一致させること（boardId, subject, unit, date, title, createdAt, archived）
+  getSheet_(SHEET_BOARDS).appendRow([id, subject, unit, "'" + date, title, new Date(), false]);
   var created = getBoard(id);
   if (!created) throw new Error('ボードの作成に失敗しました。もう一度お試しください。');
   // 既定セクションを1つ用意しておく（最初から投稿できるように）
-  getSheet_(SHEET_SECTIONS).appendRow([genId_('s'), id, 'みんなの投稿', 1, new Date()]);
+  getSheet_(SHEET_SECTIONS).appendRow([genId_('s'), id, 'みんなの投稿', 1, new Date(), '']);
   return created;
 }
 
@@ -427,21 +445,31 @@ function deleteBoard(boardId) {
 function getSections(boardId) {
   var secs = readSheet_(SHEET_SECTIONS)
     .filter(function (s) { return s.boardId === boardId; })
-    .map(function (s) { return { sectionId: s.sectionId, boardId: s.boardId, name: s.name, sortOrder: Number(s.sortOrder) || 0 }; });
+    .map(function (s) { return { sectionId: s.sectionId, boardId: s.boardId, name: s.name, sortOrder: Number(s.sortOrder) || 0, color: s.color || '' }; });
   secs.sort(function (a, b) { return a.sortOrder - b.sortOrder; });
   return secs;
 }
 
-/** セクション作成（先生のみ）。 */
-function createSection(boardId, name, teacherPassword) {
+/** セクション作成（先生のみ）。color は任意。 */
+function createSection(boardId, name, teacherPassword, color) {
   if (!isTeacher_(teacherPassword)) throw new Error('セクションの操作は先生のみ可能です。');
   name = String(name || '').trim();
   if (!name) throw new Error('セクション名を入力してください。');
   if (!getBoard(boardId)) throw new Error('ボードが見つかりません。');
   var maxOrder = 0;
   getSections(boardId).forEach(function (s) { if (s.sortOrder > maxOrder) maxOrder = s.sortOrder; });
-  getSheet_(SHEET_SECTIONS).appendRow([genId_('s'), boardId, name, maxOrder + 1, new Date()]);
+  getSheet_(SHEET_SECTIONS).appendRow([genId_('s'), boardId, name, maxOrder + 1, new Date(), String(color || '')]);
   return getSections(boardId);
+}
+
+/** セクションの色を変更（先生のみ）。 */
+function setSectionColor(sectionId, color, teacherPassword) {
+  if (!isTeacher_(teacherPassword)) throw new Error('セクションの操作は先生のみ可能です。');
+  var sheet = getSheet_(SHEET_SECTIONS);
+  var s = readSheet_(SHEET_SECTIONS).filter(function (x) { return x.sectionId === sectionId; })[0];
+  if (!s) throw new Error('セクションが見つかりません。');
+  sheet.getRange(s._row, SHEET_DEFS[SHEET_SECTIONS].indexOf('color') + 1).setValue(String(color || ''));
+  return getSections(s.boardId);
 }
 
 /** セクション改名（先生のみ）。 */
@@ -477,7 +505,7 @@ function ensureDefaultSection_(boardId) {
   var secs = getSections(boardId);
   if (secs.length) return secs[0].sectionId;
   var id = genId_('s');
-  getSheet_(SHEET_SECTIONS).appendRow([id, boardId, 'みんなの投稿', 1, new Date()]);
+  getSheet_(SHEET_SECTIONS).appendRow([id, boardId, 'みんなの投稿', 1, new Date(), '']);
   return id;
 }
 
