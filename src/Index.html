@@ -878,7 +878,7 @@ var App = (function(){
       +'<button type="button" class="ghost-btn" onclick="App.openCamera()">📷 カメラで撮影（写真・動画）</button>'
       +'</div>'
       +'<div id="mPrev" style="margin-bottom:12px"></div>'
-      +(mode==='edit'?'<div id="mRemoveWrap" style="margin-bottom:12px"></div>':'')
+      +'<div id="mRemoveWrap" style="margin-bottom:12px"></div>'
       +'<div class="color-row" id="cRow"></div>'
       +'<div class="modal-actions"><button class="ghost-btn" onclick="App.closeModal()">キャンセル</button>'
       +'<button class="primary-btn" id="mSubmit" onclick="App.submitMedia()">'+okLabel+'</button></div>';
@@ -981,11 +981,14 @@ var App = (function(){
         ?'<iframe src="'+esc(editTarget.photoUrl)+'" class="vid" style="height:240px"></iframe>'
         :'<img src="'+esc(editTarget.photoUrl)+'" referrerpolicy="no-referrer" style="width:100%;border-radius:10px">';
     }else{ el.innerHTML=''; }
-    // 編集時：既存または新規の添付があれば「消す」ボタンを出す
+    // 新規・既存どちらの添付でも「削除」ボタンを出す（投稿前に消せる）
     var rw=$('mRemoveWrap');
     if(rw){
-      var has=pendingMedia||(editTarget&&editTarget.photoUrl&&!removeExisting);
-      rw.innerHTML=has?'<button type="button" class="ghost-btn danger" onclick="App.clearMedia()">🗑 添付を消す</button>':'';
+      var has=pendingMedia||(mode==='edit'&&editTarget&&editTarget.photoUrl&&!removeExisting);
+      var label=pendingMedia
+        ? (pendingMedia.kind==='video'?'🗑 この動画を削除':pendingMedia.kind==='pdf'?'🗑 このPDFを削除':'🗑 この写真を削除')
+        : '🗑 添付を削除';
+      rw.innerHTML=has?'<button type="button" class="ghost-btn danger" onclick="App.clearMedia()">'+label+'</button>':'';
     }
   }
   function clearMedia(){ pendingMedia=null; removeExisting=true; if($('mFile'))$('mFile').value=''; renderMediaPreview(); }

@@ -812,10 +812,11 @@ function saveMedia_(media, board) {
   var folder = getPhotoFolder_();
   var subName = (board.subject || 'その他') + '_' + (board.unit || '');
   var sub = getOrCreateSubfolder_(folder, subName);
-  var mime = media.mimeType || 'image/jpeg';
+  // MIME は "video/webm;codecs=vp9" のように余分が付くことがあるので主要部だけ使う
+  var mime = String(media.mimeType || 'image/jpeg').split(';')[0].trim() || 'image/jpeg';
   var isVideo = (media.kind === 'video') || /^video\//.test(mime);
   var isPdf = (media.kind === 'pdf') || mime === 'application/pdf';
-  var bytes = Utilities.base64Decode(media.data);
+  var bytes = decodeBase64_(media.data);
   var defName = (isPdf ? 'file_' : isVideo ? 'video_' : 'photo_') + Date.now() + (isPdf ? '.pdf' : isVideo ? '.mp4' : '.jpg');
   var blob = Utilities.newBlob(bytes, mime, media.filename || defName);
   var file = sub.createFile(blob);
@@ -826,6 +827,24 @@ function saveMedia_(media, board) {
     return { fileId: id, url: 'https://drive.google.com/file/d/' + id + '/preview', mediaType: isPdf ? 'pdf' : 'video' };
   }
   return { fileId: id, url: 'https://drive.google.com/thumbnail?id=' + id + '&sz=w1000', mediaType: 'image' };
+}
+
+/**
+ * base64 を頑丈にデコードする。
+ * - "data:...;base64," のデータURL接頭辞が混ざっていても除去
+ * - 改行・空白を除去
+ * - URLセーフ（- _）形式にも対応
+ */
+function decodeBase64_(data) {
+  data = String(data || '');
+  var ci = data.indexOf('base64,');
+  if (ci >= 0) data = data.slice(ci + 7);
+  data = data.replace(/\s+/g, '');
+  if (!data) throw new Error('メディアのデータが空です。もう一度撮影／選択してください。');
+  if (data.indexOf('-') >= 0 || data.indexOf('_') >= 0) {
+    return Utilities.base64DecodeWebSafe(data);
+  }
+  return Utilities.base64Decode(data);
 }
 function getOrCreateSubfolder_(parent, name) {
   var it = parent.getFoldersByName(name);
