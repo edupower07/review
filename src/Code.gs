@@ -9,6 +9,7 @@ var PROP_SPREADSHEET_ID = 'SPREADSHEET_ID';
 var PROP_FOLDER_ID = 'PHOTO_FOLDER_ID';
 var PROP_TEACHER_HASH = 'TEACHER_HASH';
 var PROP_TEACHER_SALT = 'TEACHER_SALT';
+var PROP_TEACHER_NAME = 'TEACHER_NAME';
 var PROP_SCHEMA_VERSION = 'SCHEMA_VERSION';
 // SHEET_DEFS を変更したら必ずこの版数を上げる（次回アクセス時に1回だけ移行が走る）
 var SCHEMA_VERSION = '8';
@@ -273,11 +274,43 @@ function teacherLogin(password) {
     var salt = newSalt_();
     props.setProperty(PROP_TEACHER_SALT, salt);
     props.setProperty(PROP_TEACHER_HASH, sha256_(salt + password));
-    return { ok: true, firstTime: true };
+    return { ok: true, firstTime: true, name: getTeacherName_() };
   }
   var salt2 = props.getProperty(PROP_TEACHER_SALT);
-  if (sha256_(salt2 + password) === hash) return { ok: true, firstTime: false };
+  if (sha256_(salt2 + password) === hash) return { ok: true, firstTime: false, name: getTeacherName_() };
   throw new Error('パスワードが違います。');
+}
+
+/** 先生の表示名（未設定なら「先生」）。 */
+function getTeacherName_() {
+  return PropertiesService.getScriptProperties().getProperty(PROP_TEACHER_NAME) || '先生';
+}
+
+/** 先生の設定取得（名前）。 */
+function getTeacherSettings(teacherPassword) {
+  if (!isTeacher_(teacherPassword)) throw new Error('先生のみ操作できます。');
+  return { name: getTeacherName_() };
+}
+
+/** 先生の表示名を変更。 */
+function setTeacherName(name, teacherPassword) {
+  if (!isTeacher_(teacherPassword)) throw new Error('先生のみ操作できます。');
+  name = String(name || '').trim();
+  if (!name) throw new Error('名前を入力してください。');
+  PropertiesService.getScriptProperties().setProperty(PROP_TEACHER_NAME, name);
+  return { name: name };
+}
+
+/** 先生のパスワードを変更（現在のパスワードで本人確認）。 */
+function setTeacherPassword(newPassword, teacherPassword) {
+  if (!isTeacher_(teacherPassword)) throw new Error('現在のパスワードが正しくありません。');
+  newPassword = String(newPassword || '');
+  if (newPassword.length < 1) throw new Error('新しいパスワードを入力してください。');
+  var props = PropertiesService.getScriptProperties();
+  var salt = newSalt_();
+  props.setProperty(PROP_TEACHER_SALT, salt);
+  props.setProperty(PROP_TEACHER_HASH, sha256_(salt + newPassword));
+  return { ok: true };
 }
 
 /** 生徒の本人確認（投稿・いいね等の操作前に呼ぶ簡易チェック）。 */
@@ -610,8 +643,15 @@ function getBoardSignature(boardId) {
 /**
  * 投稿。media は { data(base64), mimeType, filename, kind:'image'|'video' } または null。
  */
-function postReflection(boardId, sectionId, studentName, password, title, text, color, media, link) {
-  if (!verifyStudent_(studentName, password)) throw new Error('ログイン情報が正しくありません。');
+function postReflection(boardId, sectionId, studentName, password, title, text, color, media, link, teacherPassword) {
+  // 先生は自分の表示名で投稿できる。それ以外は生徒の本人確認。
+  var author;
+  if (teacherPassword && isTeacher_(teacherPassword)) {
+    author = getTeacherName_();
+  } else {
+    if (!verifyStudent_(studentName, password)) throw new Error('ログイン情報が正しくありません。');
+    author = studentName;
+  }
   title = String(title || '').trim();
   text = String(text || '').trim();
   var linkObj = sanitizeLink_(link);
@@ -637,13 +677,13 @@ function postReflection(boardId, sectionId, studentName, password, title, text, 
   var now = new Date();
   // 列順は SHEET_DEFS[SHEET_REFLECTIONS] と一致させること
   getSheet_(SHEET_REFLECTIONS).appendRow([
-    id, boardId, studentName, text, url, fileId, color || '#fff7c0', maxOrder + 1, now, sectionId, mediaType, now, false, title,
+    id, boardId, author, text, url, fileId, color || '#fff7c0', maxOrder + 1, now, sectionId, mediaType, now, false, title,
     linkObj ? JSON.stringify(linkObj) : ''
   ]);
   // 速度重視：作成したカード1枚だけを返す（クライアントは部分描画する）
   return {
     card: {
-      reflectionId: id, sectionId: sectionId, studentName: studentName, title: title, text: text,
+      reflectionId: id, sectionId: sectionId, studentName: author, title: title, text: text,
       photoUrl: url, mediaType: mediaType, color: color || '#fff7c0', sortOrder: maxOrder + 1,
       createdAt: now.getTime(), updatedAt: now.getTime(), pinned: false,
       link: linkObj, reactions: {}, myReactions: {},
