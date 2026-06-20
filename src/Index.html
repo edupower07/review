@@ -134,21 +134,22 @@
     .card .card-title{font-weight:700;font-size:16px;line-height:1.4;margin:2px 0 2px;word-break:break-word}
     .card .body{font-size:15px;white-space:pre-wrap;word-break:break-word;line-height:1.6}
     .card img.photo{width:100%;border-radius:10px;margin-top:8px;display:block;cursor:zoom-in}
-    .card .media-wrap{position:relative;margin-top:8px}
-    .card .media-wrap .vid{margin-top:0}
-    .card .media-exp{position:absolute;top:8px;right:8px;background:rgba(0,0,0,.6);color:#fff;border:none;
-      border-radius:8px;padding:4px 9px;font-size:12px;cursor:pointer}
-    .card .media-exp:hover{background:rgba(0,0,0,.8)}
-    .card .pdf-tag{display:inline-block;margin-top:8px;background:#fbeaea;color:#c0392b;border-radius:8px;
-      padding:6px 10px;font-size:13px;font-weight:600;cursor:zoom-in}
+    .card .media-box{margin-top:8px;border-radius:10px;padding:18px 12px;text-align:center;cursor:pointer;
+      background:#1b1b1b;color:#fff;font-weight:600;font-size:14px}
+    .card .media-box:hover{background:#000}
+    .card .media-box.pdfbox{background:#fbeaea;color:#c0392b}
+    .card .media-box.pdfbox:hover{background:#f6dcdc}
+    .card .media-box .ic{font-size:30px;display:block;margin-bottom:6px}
     .card .time{color:rgba(0,0,0,.40);font-size:11px;margin-top:6px}
     /* 拡大プレビュー（ライトボックス） */
     .lightbox{position:fixed;inset:0;background:rgba(0,0,0,.86);z-index:500;display:flex;
       align-items:center;justify-content:center;padding:24px}
     .lightbox img{max-width:95vw;max-height:90vh;border-radius:8px;background:#000}
-    .lightbox iframe{width:92vw;height:90vh;border:0;border-radius:8px;background:#fff}
+    .lightbox iframe{width:92vw;height:86vh;border:0;border-radius:8px;background:#fff}
     .lightbox .lb-close{position:absolute;top:14px;right:18px;background:rgba(255,255,255,.92);border:none;
       border-radius:50%;width:44px;height:44px;font-size:24px;line-height:1;cursor:pointer}
+    .lightbox .lb-open{position:absolute;top:18px;left:18px;background:rgba(255,255,255,.92);border:none;
+      border-radius:10px;padding:9px 14px;font-size:14px;cursor:pointer;text-decoration:none;color:#222}
     /* 右上の⋮メニュー */
     .card .tools{position:absolute;top:6px;right:6px}
     .card .tools .t-menu{background:rgba(255,255,255,.6);border:none;border-radius:7px;cursor:pointer;
@@ -577,12 +578,10 @@ var App = (function(){
     if(r.photoUrl){
       var fid=driveFileId(r.photoUrl);
       if(r.mediaType==='video'){
-        media='<div class="media-wrap"><iframe class="vid" src="'+esc(r.photoUrl)+'" allow="autoplay" allowfullscreen></iframe>'
-          +'<button class="media-exp" data-file="'+esc(fid)+'" data-kind="video">⛶ 拡大</button></div>';
+        // インラインiframeは重いので、クリックで再生する軽量パネルにする
+        media='<div class="media-box" data-file="'+esc(fid)+'" data-kind="video"><span class="ic">🎬</span>動画を見る（クリック）</div>';
       }else if(r.mediaType==='pdf'){
-        media='<div class="media-wrap"><iframe class="vid" src="'+esc(r.photoUrl)+'"></iframe>'
-          +'<button class="media-exp" data-file="'+esc(fid)+'" data-kind="pdf">⛶ 拡大</button></div>'
-          +'<span class="pdf-tag" data-file="'+esc(fid)+'" data-kind="pdf">📄 PDFを開く</span>';
+        media='<div class="media-box pdfbox" data-file="'+esc(fid)+'" data-kind="pdf"><span class="ic">📄</span>PDFを開く（クリック）</div>';
       }else{
         media='<img class="photo" data-file="'+esc(fid)+'" data-kind="image" src="'+esc(r.photoUrl)+'" loading="lazy" referrerpolicy="no-referrer">';
       }
@@ -649,11 +648,16 @@ var App = (function(){
   }
   function openLightbox(fileId,kind){
     if(!fileId){ toast('このメディアは拡大表示できません'); return; }
-    var inner=(kind==='image')
-      ? '<img src="https://drive.google.com/thumbnail?id='+esc(fileId)+'&sz=w1920" referrerpolicy="no-referrer">'
-      : '<iframe src="https://drive.google.com/file/d/'+esc(fileId)+'/preview" allow="autoplay" allowfullscreen></iframe>';
+    var inner, openLink='';
+    if(kind==='image'){
+      inner='<img src="https://drive.google.com/thumbnail?id='+esc(fileId)+'&sz=w1920" referrerpolicy="no-referrer">';
+    }else{
+      inner='<iframe src="https://drive.google.com/file/d/'+esc(fileId)+'/preview" allow="autoplay" allowfullscreen></iframe>';
+      // 動画・PDFはGoogleドライブの本体ページを別タブで開けるようにする
+      openLink='<a class="lb-open" href="https://drive.google.com/file/d/'+esc(fileId)+'/view" target="_blank" rel="noopener">↗ 新しいタブで開く</a>';
+    }
     var lb=document.createElement('div'); lb.className='lightbox';
-    lb.innerHTML=inner+'<button class="lb-close" title="閉じる">×</button>';
+    lb.innerHTML=inner+openLink+'<button class="lb-close" title="閉じる">×</button>';
     lb.addEventListener('click',function(e){ if(e.target===lb||e.target.classList.contains('lb-close')) closeLightbox(); });
     document.body.appendChild(lb);
     document.addEventListener('keydown',lbEsc);
@@ -919,29 +923,38 @@ var App = (function(){
       +'<script>'
       +'var stream=null,rec=null,chunks=[],facing="user",recording=false;'
       +'function $(i){return document.getElementById(i);}'
+      +'function b64(u){var i=u.indexOf("base64,");return i>=0?u.slice(i+7):u;}'
       +'function start(){stop();navigator.mediaDevices.getUserMedia({video:{facingMode:facing},audio:true}).then(function(s){stream=s;$("v").srcObject=s;$("msg").textContent="撮影できます";}).catch(function(e){$("msg").textContent="カメラを起動できません: "+(e.message||e);});}'
       +'function stop(){if(stream){stream.getTracks().forEach(function(t){t.stop();});stream=null;}}'
       +'function flip(){facing=(facing==="user")?"environment":"user";start();}'
-      +'function snap(){var v=$("v");if(!v.videoWidth){return;}var m=1280,w=v.videoWidth,h=v.videoHeight;if(w>h&&w>m){h=Math.round(h*m/w);w=m;}else if(h>=w&&h>m){w=Math.round(w*m/h);h=m;}var c=document.createElement("canvas");c.width=w;c.height=h;c.getContext("2d").drawImage(v,0,0,w,h);var u=c.toDataURL("image/jpeg",0.85);send({data:u.split(",")[1],mimeType:"image/jpeg",filename:"camera_"+Date.now()+".jpg",kind:"image",dataUrl:u});}'
-      +'function toggleRec(){if(!stream)return;if(!recording){chunks=[];var o={};try{if(MediaRecorder.isTypeSupported("video/webm;codecs=vp9"))o={mimeType:"video/webm;codecs=vp9"};else if(MediaRecorder.isTypeSupported("video/webm"))o={mimeType:"video/webm"};}catch(e){}try{rec=new MediaRecorder(stream,o);}catch(e){$("msg").textContent="録画を開始できません";return;}rec.ondataavailable=function(ev){if(ev.data&&ev.data.size)chunks.push(ev.data);};rec.onstop=function(){var b=new Blob(chunks,{type:rec.mimeType||"video/webm"});if(b.size>20*1048576){$("msg").textContent="動画が長すぎます（20MBまで）";return;}var fr=new FileReader();fr.onload=function(ev){var u=ev.target.result;send({data:u.split(",")[1],mimeType:b.type,filename:"camera_"+Date.now()+".webm",kind:"video",dataUrl:u});};fr.readAsDataURL(b);};rec.start();recording=true;$("rec").textContent="■ 停止";$("msg").innerHTML="● 録画中…";}else{recording=false;try{rec.stop();}catch(e){}}}'
+      +'function snap(){var v=$("v");if(!v.videoWidth){return;}var m=1280,w=v.videoWidth,h=v.videoHeight;if(w>h&&w>m){h=Math.round(h*m/w);w=m;}else if(h>=w&&h>m){w=Math.round(w*m/h);h=m;}var c=document.createElement("canvas");c.width=w;c.height=h;c.getContext("2d").drawImage(v,0,0,w,h);var u=c.toDataURL("image/jpeg",0.85);send({data:b64(u),mimeType:"image/jpeg",filename:"camera_"+Date.now()+".jpg",kind:"image",dataUrl:u});}'
+      +'function toggleRec(){if(!stream)return;if(!recording){chunks=[];var o={videoBitsPerSecond:2500000,audioBitsPerSecond:96000};try{if(MediaRecorder.isTypeSupported("video/webm;codecs=vp9"))o.mimeType="video/webm;codecs=vp9";else if(MediaRecorder.isTypeSupported("video/webm"))o.mimeType="video/webm";}catch(e){}try{rec=new MediaRecorder(stream,o);}catch(e){$("msg").textContent="録画を開始できません";return;}rec.ondataavailable=function(ev){if(ev.data&&ev.data.size)chunks.push(ev.data);};rec.onstop=function(){var b=new Blob(chunks,{type:rec.mimeType||"video/webm"});if(b.size>60*1048576){$("msg").textContent="動画が長すぎます（60MBまで）";return;}var fr=new FileReader();fr.onload=function(ev){var u=ev.target.result;send({data:b64(u),mimeType:b.type,filename:"camera_"+Date.now()+".webm",kind:"video",dataUrl:u});};fr.readAsDataURL(b);};rec.start();recording=true;$("rec").textContent="■ 停止";$("msg").innerHTML="● 録画中…";}else{recording=false;try{rec.stop();}catch(e){}}}'
       +'function send(media){try{window.opener.App.onCapture(media);}catch(e){alert("本体に渡せませんでした");return;}stop();window.close();}'
       +'window.addEventListener("beforeunload",stop);start();'
       +'<\/script></body></html>';
     w.document.open(); w.document.write(doc); w.document.close();
   }
 
+  // データURLから base64 本体だけを安全に取り出す。
+  // 動画は "data:video/webm;codecs=vp9,opus;base64,..." のように codecs にカンマが
+  // 入ることがあり split(',') では壊れるため、必ず "base64," の位置で切り出す。
+  function dataB64(u){
+    u=String(u||''); var i=u.indexOf('base64,');
+    if(i>=0) return u.slice(i+7);
+    var c=u.indexOf(','); return c>=0?u.slice(c+1):u;
+  }
   function onFile(e){
     var f=e.target.files[0]; if(!f){return;}
     var isVideo=/^video\//.test(f.type);
     var isPdf=(f.type==='application/pdf')||/\.pdf$/i.test(f.name);
     if(isVideo||isPdf){
-      var limitMb=isVideo?20:15;
+      var limitMb=isVideo?50:15;
       if(f.size>limitMb*1024*1024){toast((isVideo?'動画':'PDF')+'が大きすぎます（'+limitMb+'MBまで）');e.target.value='';return;}
       var reader=new FileReader();
       reader.onload=function(ev){
         pendingMedia=isPdf
-          ?{data:ev.target.result.split(',')[1],mimeType:'application/pdf',filename:f.name||'file.pdf',kind:'pdf',previewUrl:URL.createObjectURL(f)}
-          :{data:ev.target.result.split(',')[1],mimeType:f.type||'video/mp4',filename:f.name||'video.mp4',kind:'video',previewUrl:URL.createObjectURL(f)};
+          ?{data:dataB64(ev.target.result),mimeType:'application/pdf',filename:f.name||'file.pdf',kind:'pdf',previewUrl:URL.createObjectURL(f)}
+          :{data:dataB64(ev.target.result),mimeType:f.type||'video/mp4',filename:f.name||'video.mp4',kind:'video',previewUrl:URL.createObjectURL(f)};
         removeExisting=false; renderMediaPreview();
       };
       reader.readAsDataURL(f);
@@ -963,7 +976,7 @@ var App = (function(){
         cv.getContext('2d').drawImage(img,0,0,w,h);
         URL.revokeObjectURL(url);
         var dataUrl=cv.toDataURL('image/jpeg',quality);
-        res({dataUrl:dataUrl,data:dataUrl.split(',')[1],mimeType:'image/jpeg',filename:(file.name||'photo').replace(/\.[^.]+$/,'')+'.jpg'});
+        res({dataUrl:dataUrl,data:dataB64(dataUrl),mimeType:'image/jpeg',filename:(file.name||'photo').replace(/\.[^.]+$/,'')+'.jpg'});
       };
       img.onerror=rej; img.src=url;
     });
@@ -978,7 +991,7 @@ var App = (function(){
           :'<img src="'+pendingMedia.previewUrl+'" style="width:100%;border-radius:10px">';
     }else if(mode==='edit'&&editTarget&&editTarget.photoUrl&&!removeExisting){
       el.innerHTML=(editTarget.mediaType==='video'||editTarget.mediaType==='pdf')
-        ?'<iframe src="'+esc(editTarget.photoUrl)+'" class="vid" style="height:240px"></iframe>'
+        ?'<iframe src="'+esc(editTarget.photoUrl)+'" style="width:100%;height:240px;border:1px solid #ddd;border-radius:10px"></iframe>'
         :'<img src="'+esc(editTarget.photoUrl)+'" referrerpolicy="no-referrer" style="width:100%;border-radius:10px">';
     }else{ el.innerHTML=''; }
     // 新規・既存どちらの添付でも「削除」ボタンを出す（投稿前に消せる）
