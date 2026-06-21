@@ -51,6 +51,7 @@ function seedDemoData() {
   var b1s1 = demoSection_(b1, '気づいたこと', 1, '#2faf6b');
   var b1s2 = demoSection_(b1, 'ぎもん・もっと知りたい', 2, '#e08a3c');
   var b1s3 = demoSection_(b1, 'まとめ', 3, '#3f7fd6');
+  var b1s4 = demoSection_(b1, '自分のふりかえり', 4, '#8c5bd0');
 
   var r;
   r = demoPost_(b1, b1s1, '佐藤 あおい', 'ふりこの長さ',
@@ -86,10 +87,27 @@ function seedDemoData() {
   demoLike_(r, '佐藤 あおい', '❤'); demoLike_(r, '鈴木 はると', '❤'); demoLike_(r, '高橋 ゆい', '👍');
   demoLike_(r, '田中 そうた', '❤');
 
+  r = demoPost_(b1, b1s3, '渡辺 りく', 'グループのけつろん',
+    '長さが同じなら、だれがはかっても同じくらいの時間になった。だから長さで決まると言える。', '#c8f0d0',
+    { order: 2, minsAgo: 25 });
+  demoLike_(r, '中村 かなと', '👍');
+
+  r = demoPost_(b1, b1s4, '中村 かなと', '',
+    '予想とちがって重さがかんけいないとわかって、実験してたしかめる大切さがわかった。', '#e8d6ff',
+    { order: 1, minsAgo: 20 });
+  demoLike_(r, '山本 ひなた', '❤'); demoComment_(r, T, 'たしかめる姿勢、すばらしいです。');
+
+  r = demoPost_(b1, b1s4, '小林 さくら', '',
+    'はかり方をくふうすると正かくになることがわかった。次もていねいにはかりたい。', '#ffe2bf',
+    { order: 2, minsAgo: 15 });
+  demoLike_(r, '高橋 ゆい', '👍'); demoLike_(r, '伊藤 めい', '❤');
+
   // ====================== ボード2：国語 ======================
   var b2 = demoBoard_('国語', 'ごんぎつね', 'ごんぎつね', 3, false);
   var b2s1 = demoSection_(b2, '心にのこった場面', 1, '#d24b8c');
   var b2s2 = demoSection_(b2, '登場人物の気もち', 2, '#8c5bd0');
+  var b2s3 = demoSection_(b2, 'すきな一文', 3, '#2faf6b');
+  var b2s4 = demoSection_(b2, '感想・伝えたいこと', 4, '#e08a3c');
 
   r = demoPost_(b2, b2s1, '小林 さくら', '',
     'ごんがつぐないをするところが心にのこった。いたずらをこうかいしていたんだと思う。', '#e8d6ff',
@@ -107,10 +125,27 @@ function seedDemoData() {
     { order: 1, minsAgo: 1300 });
   demoComment_(r, T, '「ひとりぼっち」に注目したのがいいですね。');
 
+  r = demoPost_(b2, b2s2, '山田 はる', '兵十の気もち',
+    '兵十は最後にごんの気もちに気づいて、後かいしたと思う。', '#cfe3ff',
+    { order: 2, minsAgo: 1280 });
+  demoLike_(r, '加藤 ゆうと', '😢');
+
+  r = demoPost_(b2, b2s3, '佐藤 あおい', '',
+    '「ごん、おまいだったのか。」という一文がいちばん心にのこった。', '#fff7c0',
+    { order: 1, pinned: true, minsAgo: 1200 });
+  demoLike_(r, '小林 さくら', '❤'); demoLike_(r, '吉田 みお', '❤'); demoLike_(r, '山田 はる', '❤');
+
+  r = demoPost_(b2, b2s4, '高橋 ゆい', '',
+    '気もちはきちんと言葉で伝えないと、すれちがってしまうと感じた。', '#c8f0d0',
+    { order: 1, minsAgo: 1100 });
+  demoLike_(r, '中村 かなと', '👍'); demoComment_(r, T, '物語から大切なことを受け取りましたね。');
+
   // ====================== ボード3：社会（リンク例あり）======================
   var b3 = demoBoard_('社会', 'だれもがくらしやすいまち', 'だれもがくらしやすいまち', 5, false);
   var b3s1 = demoSection_(b3, '見つけたくふう', 1, '#2796a8');
   var b3s2 = demoSection_(b3, '調べてわかったこと', 2, '#c8862a');
+  var b3s3 = demoSection_(b3, 'みんなに伝えたいこと', 3, '#3f7fd6');
+  var b3s4 = demoSection_(b3, 'もっと調べたいこと', 4, '#e8554e');
 
   r = demoPost_(b3, b3s1, '中村 かなと', 'スロープを見つけた',
     '駅にスロープと点字ブロックがあった。だれでも使えるようにくふうされていた。', '#c8f0d0',
@@ -132,6 +167,16 @@ function seedDemoData() {
     });
   demoLike_(r, '中村 かなと', '❤'); demoLike_(r, '小林 さくら', '👍');
   demoComment_(r, T, 'よく見つけましたね。どんなくふうがありましたか？');
+
+  r = demoPost_(b3, b3s3, '伊藤 めい', '',
+    'だれもが使えるくふうは、こまっている人だけでなく、みんなが助かるとわかった。', '#cfe3ff',
+    { order: 1, minsAgo: 1700 });
+  demoLike_(r, '田中 そうた', '❤'); demoLike_(r, '渡辺 りく', '👍');
+
+  r = demoPost_(b3, b3s4, '渡辺 りく', '',
+    '自分のまちには、ほかにどんなユニバーサルデザインがあるか調べてみたい。', '#ffe2bf',
+    { order: 1, minsAgo: 1600 });
+  demoLike_(r, '山田 はる', '🤔'); demoComment_(r, '加藤 ゆうと', 'いっしょに調べたい！');
 
   // ====================== ボード4：非表示（アーカイブ）の例 ======================
   // 児童のボード一覧には出ません。先生画面では「非表示」として確認・再表示できます。

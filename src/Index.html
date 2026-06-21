@@ -257,7 +257,7 @@
 // ============================================================
 var App = (function(){
   // サーバー(Code.gs)の APP_BUILD と必ず一致させること。ズレていれば「デプロイ未更新」を警告する。
-  var APP_BUILD = '11';
+  var APP_BUILD = '12';
   var COLORS = ['#fff7c0','#ffd1dc','#c8f0d0','#cfe3ff','#e8d6ff','#ffe2bf','#ffffff'];
   // セクションの色分け用パレット（先生が選ぶ）
   var SECTION_COLORS = ['#e8554e','#e08a3c','#d9a400','#2faf6b','#2796a8','#3f7fd6','#8c5bd0','#d24b8c','#7a8b3c','#6a7a8c'];
@@ -967,17 +967,25 @@ var App = (function(){
     renderLinkPreview();
     // 表示名が未入力なら、ブラウザからページのタイトルを取得（権限不要・失敗してもドメイン表示のまま）
     if(!manual){
-      var box=$('mLinkPrev');
-      if(box) box.insertAdjacentHTML('afterbegin','<div id="lkLoad" style="color:var(--muted);font-size:13px;margin-bottom:6px">タイトルを取得中…</div>');
+      setLinkNote('タイトルを取得中…');
       fetchTitleViaProxy(lk.url).then(function(title){
-        var ld=$('lkLoad'); if(ld)ld.remove();
         if(title && pendingLink && pendingLink.url===lk.url){
           pendingLink.title=title;
           if($('mLinkTitle')) $('mLinkTitle').value=title;
+          setLinkNote('');
           renderLinkPreview();
+        }else{
+          setLinkNote('⚠ サイト名を自動取得できませんでした（ネットワーク制限の可能性）。上の「表示名」に手で入力できます。');
         }
-      }).catch(function(){ var ld=$('lkLoad'); if(ld)ld.remove(); });
+      }).catch(function(){
+        setLinkNote('⚠ サイト名を自動取得できませんでした（ネットワーク制限の可能性）。上の「表示名」に手で入力できます。');
+      });
     }
+  }
+  function setLinkNote(msg){
+    var box=$('mLinkPrev'); if(!box)return;
+    var n=$('lkNote'); if(n)n.remove();
+    if(msg) box.insertAdjacentHTML('afterbegin','<div id="lkNote" style="color:var(--muted);font-size:13px;margin-bottom:6px">'+esc(msg)+'</div>');
   }
   function onLinkTitle(v){ if(pendingLink){ pendingLink.title=(v||'').trim()||pendingLink.site; renderLinkPreview(); } }
   function decodeHtml(s){ var t=document.createElement('textarea'); t.innerHTML=String(s||''); return t.value.trim(); }
@@ -988,15 +996,33 @@ var App = (function(){
     var t=html.match(/<title[^>]*>([\s\S]*?)<\/title>/i);
     return t?decodeHtml(t[1]):'';
   }
-  // 生徒のブラウザから取得（CORSプロキシ経由）。複数候補を順に試す。
+  // タイムアウト付き fetch（応答しない中継先で固まらないように）
+  function fetchTimeout(url,ms){
+    ms=ms||6000;
+    var ctrl=('AbortController' in window)?new AbortController():null;
+    var t=ctrl?setTimeout(function(){try{ctrl.abort();}catch(e){}},ms):null;
+    return fetch(url,ctrl?{signal:ctrl.signal}:{}).then(function(r){ if(t)clearTimeout(t); if(!r.ok)throw 0; return r; });
+  }
+  // 生徒のブラウザから取得（権限不要）。YouTubeは公式oEmbed、その他はCORSプロキシを順に試す。
   function fetchTitleViaProxy(url){
+    if(youtubeId(url)){
+      return fetchTimeout('https://www.youtube.com/oembed?format=json&url='+encodeURIComponent(url))
+        .then(function(r){return r.json();}).then(function(j){return (j&&j.title)||'';})
+        .then(function(t){ return t||tryProxies(url); })
+        .catch(function(){ return tryProxies(url); });
+    }
+    return tryProxies(url);
+  }
+  function tryProxies(url){
     var tries=[
       'https://api.allorigins.win/raw?url='+encodeURIComponent(url),
-      'https://corsproxy.io/?url='+encodeURIComponent(url)
+      'https://corsproxy.io/?url='+encodeURIComponent(url),
+      'https://api.codetabs.com/v1/proxy/?quest='+encodeURIComponent(url),
+      'https://thingproxy.freeboard.io/fetch/'+url
     ];
     function attempt(i){
       if(i>=tries.length) return Promise.resolve('');
-      return fetch(tries[i]).then(function(r){ if(!r.ok) throw 0; return r.text(); })
+      return fetchTimeout(tries[i]).then(function(r){ return r.text(); })
         .then(function(html){ var t=extractTitle(html); return t||attempt(i+1); })
         .catch(function(){ return attempt(i+1); });
     }
