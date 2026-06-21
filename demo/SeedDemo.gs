@@ -1,0 +1,211 @@
+/**
+ * Manabase デモ用データ投入スクリプト（説明・デモ専用）
+ * ──────────────────────────────────────────────────────────────
+ * ※ アプリ本体（Code.gs / Index.html）には含めません。デモのときだけ使います。
+ *
+ * 【使い方】
+ *   1. このファイルの内容を Apps Script プロジェクトに新しいスクリプトファイル
+ *      （例：SeedDemo.gs）として追加する。
+ *   2. 上部の関数選択で「seedDemoData」を選び、「実行」する。
+ *      → 生徒名簿・ボード・セクション・投稿・コメント・リアクション・リンク例が入ります。
+ *   3. 実行ログ（表示 → ログ）に、ログイン用のパスワードが表示されます。
+ *
+ * 【ログイン情報（デモ）】
+ *   ・生徒：名簿の名前を選んで、パスワードは全員「1234」
+ *   ・先生：パスワード「demo1234」／表示名「福田先生」
+ *     （※先生パスワードが未設定のときだけ設定します。設定済みなら変更しません）
+ *
+ * 【作り直したいとき】
+ *   ・「clearAllData」を実行すると全データを消去できます（ヘッダーは残します）。
+ *     消去後にもう一度「seedDemoData」を実行すればきれいな状態で入れ直せます。
+ *     ※ clearAllData は全データを消すので、本番データが入っている環境では使わないでください。
+ *
+ * このスクリプトは Code.gs の共通関数（ensureInit_ / getSheet_ / genId_ /
+ * sha256_ / newSalt_ / readSheet_ と各 SHEET_* 定数）を利用します。
+ */
+
+function seedDemoData() {
+  ensureInit_();
+  var props = PropertiesService.getScriptProperties();
+
+  // ---- 先生（未設定のときだけパスワードを設定）----
+  if (!props.getProperty(PROP_TEACHER_HASH)) {
+    var ts = newSalt_();
+    props.setProperty(PROP_TEACHER_SALT, ts);
+    props.setProperty(PROP_TEACHER_HASH, sha256_(ts + 'demo1234'));
+  }
+  props.setProperty(PROP_TEACHER_NAME, '福田先生');
+
+  // ---- 生徒名簿（パスワードは全員 1234）----
+  var roster = [
+    [1, '佐藤 あおい'], [2, '鈴木 はると'], [3, '高橋 ゆい'], [4, '田中 そうた'],
+    [5, '伊藤 めい'], [6, '渡辺 りく'], [7, '山本 ひなた'], [8, '中村 かなと'],
+    [9, '小林 さくら'], [10, '加藤 ゆうと'], [11, '吉田 みお'], [12, '山田 はる']
+  ];
+  roster.forEach(function (p) { addDemoStudent_(p[0], p[1], '1234'); });
+
+  var T = '福田先生';
+
+  // ====================== ボード1：理科 ======================
+  var b1 = demoBoard_('理科', 'ふりこのきまり', 'ふりこのきまり', 1, false);
+  var b1s1 = demoSection_(b1, '気づいたこと', 1, '#2faf6b');
+  var b1s2 = demoSection_(b1, 'ぎもん・もっと知りたい', 2, '#e08a3c');
+  var b1s3 = demoSection_(b1, 'まとめ', 3, '#3f7fd6');
+
+  var r;
+  r = demoPost_(b1, b1s1, '佐藤 あおい', 'ふりこの長さ',
+    'ふりこの長さを長くすると、1往復する時間が長くなった。みじかくすると速くなった。', '#fff7c0',
+    { order: 1, pinned: true, minsAgo: 180 });
+  demoLike_(r, '鈴木 はると', '❤'); demoLike_(r, '高橋 ゆい', '❤'); demoLike_(r, '田中 そうた', '👍');
+  demoComment_(r, '鈴木 はると', 'ぼくのはんも同じ結果になったよ！');
+  demoComment_(r, T, 'よく気づきましたね。長さがポイントですね。');
+
+  r = demoPost_(b1, b1s1, '鈴木 はると', 'おもりの重さ',
+    'おもりを1個から3個にふやしても、1往復の時間はかわらなかった。意外だった。', '#cfe3ff',
+    { order: 2, minsAgo: 160 });
+  demoLike_(r, '佐藤 あおい', '😲'); demoLike_(r, '山本 ひなた', '😲');
+
+  r = demoPost_(b1, b1s1, '高橋 ゆい', 'はかり方のくふう',
+    '10往復の時間をはかって10でわると、1往復をより正かくにもとめられた。', '#c8f0d0',
+    { order: 3, minsAgo: 120 });
+  demoLike_(r, '田中 そうた', '👍'); demoComment_(r, '加藤 ゆうと', 'なるほど、それいいね。');
+
+  r = demoPost_(b1, b1s2, '田中 そうた', '',
+    'もっと長いふりこだったら何秒になるのか、ためしてみたい。', '#ffe2bf',
+    { order: 1, minsAgo: 100 });
+  demoLike_(r, '小林 さくら', '🤔');
+
+  r = demoPost_(b1, b1s2, '伊藤 めい', 'ふれはばは？',
+    'ふれはばを大きくしたら時間はかわるのかな？次の実験でたしかめたい。', '#ffd1dc',
+    { order: 2, minsAgo: 80 });
+  demoComment_(r, T, 'いい問いですね。予想も書いてみましょう。');
+
+  r = demoPost_(b1, b1s3, '山本 ひなた', '今日のまとめ',
+    'ふりこが1往復する時間は「ふりこの長さ」でかわる。おもりの重さやふれはばはかんけいなかった。', '#fff7c0',
+    { order: 1, minsAgo: 30 });
+  demoLike_(r, '佐藤 あおい', '❤'); demoLike_(r, '鈴木 はると', '❤'); demoLike_(r, '高橋 ゆい', '👍');
+  demoLike_(r, '田中 そうた', '❤');
+
+  // ====================== ボード2：国語 ======================
+  var b2 = demoBoard_('国語', 'ごんぎつね', 'ごんぎつね', 3, false);
+  var b2s1 = demoSection_(b2, '心にのこった場面', 1, '#d24b8c');
+  var b2s2 = demoSection_(b2, '登場人物の気もち', 2, '#8c5bd0');
+
+  r = demoPost_(b2, b2s1, '小林 さくら', '',
+    'ごんがつぐないをするところが心にのこった。いたずらをこうかいしていたんだと思う。', '#e8d6ff',
+    { order: 1, pinned: true, minsAgo: 1400 });
+  demoLike_(r, '吉田 みお', '❤'); demoLike_(r, '山田 はる', '❤');
+  demoComment_(r, '吉田 みお', 'わたしもそこが心にのこりました。');
+
+  r = demoPost_(b2, b2s1, '加藤 ゆうと', '',
+    '兵十がごんをうってしまう場面が悲しかった。気づくのがおそかった。', '#cfe3ff',
+    { order: 2, minsAgo: 1380 });
+  demoLike_(r, '小林 さくら', '😢'); demoLike_(r, '中村 かなと', '😢');
+
+  r = demoPost_(b2, b2s2, '吉田 みお', 'ごんの気もち',
+    'ひとりぼっちのごんは、兵十とつながりたかったんじゃないかな。', '#ffd1dc',
+    { order: 1, minsAgo: 1300 });
+  demoComment_(r, T, '「ひとりぼっち」に注目したのがいいですね。');
+
+  // ====================== ボード3：社会（リンク例あり）======================
+  var b3 = demoBoard_('社会', 'だれもがくらしやすいまち', 'だれもがくらしやすいまち', 5, false);
+  var b3s1 = demoSection_(b3, '見つけたくふう', 1, '#2796a8');
+  var b3s2 = demoSection_(b3, '調べてわかったこと', 2, '#c8862a');
+
+  r = demoPost_(b3, b3s1, '中村 かなと', 'スロープを見つけた',
+    '駅にスロープと点字ブロックがあった。だれでも使えるようにくふうされていた。', '#c8f0d0',
+    { order: 1, minsAgo: 2000 });
+  demoLike_(r, '佐藤 あおい', '👍'); demoLike_(r, '山田 はる', '👍');
+
+  // リンク（ユニバーサルデザインの記事）。表示名つき・権限不要のリンクカード。
+  r = demoPost_(b3, b3s2, '山田 はる', 'ユニバーサルデザインの記事',
+    'ユニバーサルデザインについて調べたページです。みんなにも読んでほしい。', '#cfe3ff',
+    {
+      order: 1, minsAgo: 1900,
+      link: {
+        url: 'https://whill.inc/jp/column/14_universaldesign',
+        title: '知っておきたい あなたの身近にユニバーサルデザイン',
+        site: 'whill.inc',
+        image: '',
+        favicon: 'https://www.google.com/s2/favicons?sz=128&domain=whill.inc'
+      }
+    });
+  demoLike_(r, '中村 かなと', '❤'); demoLike_(r, '小林 さくら', '👍');
+  demoComment_(r, T, 'よく見つけましたね。どんなくふうがありましたか？');
+
+  // ====================== ボード4：非表示（アーカイブ）の例 ======================
+  // 児童のボード一覧には出ません。先生画面では「非表示」として確認・再表示できます。
+  demoBoard_('算数・数学', 'いろいろな単位（おわった単元）', 'いろいろな単位', 20, true);
+
+  Logger.log('✅ デモデータを投入しました。\n'
+    + '・生徒ログイン：名前を選んで パスワード「1234」\n'
+    + '・先生ログイン：パスワード「demo1234」（表示名：福田先生）\n'
+    + '・ボード：理科／国語／社会（リンク例）＋ 非表示の例（算数）');
+  return 'done';
+}
+
+// ---- 低レベルの投入ヘルパー（列順は Code.gs の SHEET_DEFS と一致させる）----
+
+function addDemoStudent_(num, name, pw) {
+  var exists = readSheet_(SHEET_STUDENTS).some(function (s) { return s.name === name; });
+  if (exists) return;
+  var salt = newSalt_();
+  getSheet_(SHEET_STUDENTS).appendRow([num, name, salt, sha256_(salt + pw), new Date()]);
+}
+
+function demoBoard_(subject, unit, title, daysAgo, archived) {
+  var id = genId_('b');
+  var d = new Date(Date.now() - (daysAgo || 0) * 86400000);
+  var ymd = Utilities.formatDate(d, 'Asia/Tokyo', 'yyyy-MM-dd');
+  // 列順：boardId, subject, unit, date, title, createdAt, archived
+  getSheet_(SHEET_BOARDS).appendRow([id, subject, unit, "'" + ymd, title || unit, d, !!archived]);
+  return id;
+}
+
+function demoSection_(boardId, name, order, color) {
+  var id = genId_('s');
+  // 列順：sectionId, boardId, name, sortOrder, createdAt, color
+  getSheet_(SHEET_SECTIONS).appendRow([id, boardId, name, order || 1, new Date(), color || '']);
+  return id;
+}
+
+function demoPost_(boardId, sectionId, author, title, text, color, opts) {
+  opts = opts || {};
+  var id = genId_('r');
+  var at = opts.at || new Date(Date.now() - (opts.minsAgo || 0) * 60000);
+  // 列順：reflectionId, boardId, studentName, text, photoUrl, photoFileId, color,
+  //       sortOrder, createdAt, sectionId, mediaType, updatedAt, pinned, title, link
+  getSheet_(SHEET_REFLECTIONS).appendRow([
+    id, boardId, author, text || '', opts.photoUrl || '', opts.photoFileId || '',
+    color || '#fff7c0', opts.order || 1, at, sectionId, opts.mediaType || '', at,
+    !!opts.pinned, title || '', opts.link ? JSON.stringify(opts.link) : ''
+  ]);
+  return id;
+}
+
+function demoComment_(reflectionId, author, text) {
+  getSheet_(SHEET_COMMENTS).appendRow([genId_('c'), reflectionId, author, text, new Date()]);
+}
+
+function demoLike_(reflectionId, studentName, type) {
+  // 列順：reflectionId, studentName, createdAt, type
+  getSheet_(SHEET_LIKES).appendRow([reflectionId, studentName, new Date(), type || '❤']);
+}
+
+/**
+ * 全データを消去します（各シートのヘッダー行は残します）。
+ * ※ デモのやり直し用。本番データのある環境では使わないでください。
+ *   先生・生徒のパスワード設定（スクリプトプロパティ）は消しません。
+ */
+function clearAllData() {
+  ensureInit_();
+  [SHEET_STUDENTS, SHEET_BOARDS, SHEET_SECTIONS, SHEET_REFLECTIONS, SHEET_COMMENTS, SHEET_LIKES]
+    .forEach(function (name) {
+      var sh = getSpreadsheet_().getSheetByName(name);
+      if (!sh) return;
+      var last = sh.getLastRow();
+      if (last > 1) sh.deleteRows(2, last - 1);
+    });
+  Logger.log('🧹 全データを消去しました（ヘッダーは保持）。seedDemoData で入れ直せます。');
+  return 'cleared';
+}
