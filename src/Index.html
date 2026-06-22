@@ -257,7 +257,7 @@
 // ============================================================
 var App = (function(){
   // サーバー(Code.gs)の APP_BUILD と必ず一致させること。ズレていれば「デプロイ未更新」を警告する。
-  var APP_BUILD = '12';
+  var APP_BUILD = '13';
   var COLORS = ['#fff7c0','#ffd1dc','#c8f0d0','#cfe3ff','#e8d6ff','#ffe2bf','#ffffff'];
   // セクションの色分け用パレット（先生が選ぶ）
   var SECTION_COLORS = ['#e8554e','#e08a3c','#d9a400','#2faf6b','#2796a8','#3f7fd6','#8c5bd0','#d24b8c','#7a8b3c','#6a7a8c'];
@@ -285,6 +285,7 @@ var App = (function(){
   var dragEl = null;
   var pollTimer = null;   // リアルタイム更新用タイマー
   var lastSig = '';       // 直近のボード状態シグネチャ
+  var lastScrollTs = 0;   // 直近にスクロールした時刻（再描画の一時停止に使う）
 
   var $ = function(id){ return document.getElementById(id); };
   var view = function(){ return $('view'); };
@@ -506,6 +507,11 @@ var App = (function(){
       +'<label><input type="checkbox" '+(onlyMedia?'checked':'')+' onchange="App.toggleMedia(this.checked)">写真・動画つきだけ</label>'
       +'<span class="fcount" id="fcount"></span>'
       +'</div>';
+    // 再描画前のスクロール位置を保存（更新で先頭に戻らないように）
+    var prevBoard=$('board');
+    var savedLeft=prevBoard?prevBoard.scrollLeft:0, savedTops={};
+    if(prevBoard){ [].slice.call(prevBoard.querySelectorAll('.card-list')).forEach(function(l){ savedTops[l.dataset.sectionId||'']=l.scrollTop; }); }
+
     view().innerHTML=bar+fbar+'<div id="board"></div>';
     var board=$('board');
 
@@ -521,6 +527,11 @@ var App = (function(){
     cols.forEach(function(sec){ board.appendChild(buildColumn(sec, bySection[sec.sectionId]||[], isTeacher)); });
     setupDnD(board);
     applyFilters();
+    // スクロール位置を復元（縦＝各セクション、横＝ボード全体）
+    board.scrollLeft=savedLeft;
+    [].slice.call(board.querySelectorAll('.card-list')).forEach(function(l){
+      var k=l.dataset.sectionId||''; if(savedTops[k]!=null) l.scrollTop=savedTops[k];
+    });
     lastSig=computeSig();
   }
 
@@ -666,6 +677,8 @@ var App = (function(){
   function cardNode(id){ return document.querySelector('.card[data-id="'+id+'"]'); }
   function closeAllMenus(){ [].forEach.call(document.querySelectorAll('.card .menu'),function(m){m.classList.add('hidden');}); }
   document.addEventListener('click',closeAllMenus);
+  // スクロール中・直後は再描画を避けたいので、最終スクロール時刻を記録（capture でセクション内のスクロールも拾う）
+  document.addEventListener('scroll',function(){ lastScrollTs=Date.now(); },true);
 
   // -------- 拡大プレビュー（ライトボックス） --------
   function driveFileId(url){
@@ -851,6 +864,7 @@ var App = (function(){
     if(dragEl) return true;
     var a=document.activeElement;
     if(a && (a.tagName==='INPUT'||a.tagName==='TEXTAREA')) return true;
+    if(Date.now()-lastScrollTs < 2500) return true; // スクロール中・直後は再描画しない
     return false;
   }
   function startPolling(boardId){
