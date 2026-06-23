@@ -257,7 +257,7 @@
 // ============================================================
 var App = (function(){
   // サーバー(Code.gs)の APP_BUILD と必ず一致させること。ズレていれば「デプロイ未更新」を警告する。
-  var APP_BUILD = '17';
+  var APP_BUILD = '18';
   var COLORS = ['#fff7c0','#ffd1dc','#c8f0d0','#cfe3ff','#e8d6ff','#ffe2bf','#ffffff'];
   // セクションの色分け用パレット（先生が選ぶ）
   var SECTION_COLORS = ['#e8554e','#e08a3c','#d9a400','#2faf6b','#2796a8','#3f7fd6','#8c5bd0','#d24b8c','#7a8b3c','#6a7a8c'];
@@ -711,11 +711,56 @@ var App = (function(){
       d.querySelector('.m-del').addEventListener('click',function(e){e.stopPropagation();closeAllMenus();delCard(r);});
     }
     renderComments(r,d); // コメントは常時表示
+    d._sig=cardSig(r);   // 差分更新で変化を検知するための指紋
     return d;
   }
 
   function findCard(id){ for(var i=0;i<current.cards.length;i++){ if(current.cards[i].reflectionId===id) return current.cards[i]; } return null; }
   function cardNode(id){ return document.querySelector('.card[data-id="'+id+'"]'); }
+
+  // -------- 差分更新（チラつかずスクロールも保つ） --------
+  function rsig(o){ if(!o)return ''; return Object.keys(o).sort().map(function(k){return k+o[k];}).join(','); }
+  function cardSig(c){
+    return [c.title,c.text,c.color,c.pinned?1:0,c.photoUrl,c.mediaType,c.updatedAt,c.sortOrder,
+      c.link?(c.link.url+'|'+c.link.title+'|'+(c.link.image||'')):'',
+      c.likeCount,rsig(c.reactions),rsig(c.myReactions),
+      (c.comments?c.comments.map(function(x){return x.commentId;}).join(','):'')].join('~');
+  }
+  function structSig_(sections,cards){
+    var orphan=cards.some(function(c){return !(c.sectionId);});
+    return (sections||[]).map(function(s){return s.sectionId+':'+s.name+':'+(s.color||'')+':'+s.sortOrder;}).join('|')+'|o='+(orphan?1:0);
+  }
+  // ポーリングでの更新を、ボードを作り直さずに反映する（構造が変わったときだけ全再描画）
+  function reconcileBoard(data){
+    var board=$('board');
+    var oldS=structSig_(current.sections,current.cards);
+    var newS=structSig_(data.sections||[],data.cards||[]);
+    applyBoardData(data);
+    if(!board || newS!==oldS){ renderBoard(); return; }
+    var bySec={}; current.cards.forEach(function(c){ (bySec[c.sectionId||'']=bySec[c.sectionId||'']||[]).push(c); });
+    var cols=current.sections.slice();
+    if((bySec['']||[]).length) cols.push({sectionId:''});
+    // 念のため：必要な列が揃っていなければ全再描画にフォールバック
+    var allListsExist=cols.every(function(sec){ return board.querySelector('.card-list[data-section-id="'+(sec.sectionId||'')+'"]'); });
+    if(!allListsExist){ renderBoard(); return; }
+    cols.forEach(function(sec){
+      var sid=sec.sectionId||'';
+      var list=board.querySelector('.card-list[data-section-id="'+sid+'"]');
+      var desired=(bySec[sid]||[]).slice().sort(clientCardCmp);
+      var keep={};
+      desired.forEach(function(c){
+        keep[c.reflectionId]=1;
+        var node=list.querySelector('.card[data-id="'+c.reflectionId+'"]');
+        if(!node){ node=cardEl(c); }
+        else if(node._sig!==cardSig(c)){ var nn=cardEl(c); list.replaceChild(nn,node); node=nn; }
+        list.appendChild(node); // 並び順に置き直す（既存ノードは移動）
+      });
+      [].slice.call(list.querySelectorAll('.card')).forEach(function(n){ if(!keep[n.dataset.id]) n.remove(); });
+      var cnt=list.parentNode.querySelector('.col-title .count'); if(cnt) cnt.textContent=desired.length;
+    });
+    applyFilters();
+    lastSig=computeSig();
+  }
   function closeAllMenus(){ [].forEach.call(document.querySelectorAll('.card .menu'),function(m){m.classList.add('hidden');}); }
   document.addEventListener('click',closeAllMenus);
   // スクロール中・直後は再描画を避けたいので、最終スクロール時刻を記録（capture でセクション内のスクロールも拾う）
@@ -764,7 +809,7 @@ var App = (function(){
     if(have){ delete r.myReactions[type]; r.reactions[type]=Math.max(0,(r.reactions[type]||0)-1); r.likeCount=Math.max(0,(r.likeCount||0)-1); }
     else { r.myReactions[type]=true; r.reactions[type]=(r.reactions[type]||0)+1; r.likeCount=(r.likeCount||0)+1; }
     updateReactDom(r,d); lastSig=computeSig();
-    run('toggleReaction',r.reflectionId,user.name,user.password,type,user.classId).then(function(res){
+    run('toggleReaction',r.reflectionId,user.name,user.password,type,user.classId,current.board?current.board.boardId:null).then(function(res){
       r.reactions=res.reactions; r.myReactions=res.myReactions; r.likeCount=res.count;
       updateReactDom(r,d); lastSig=computeSig();
     }).catch(function(e){
@@ -803,7 +848,7 @@ var App = (function(){
       var input=box.querySelector('input'), btn=box.querySelector('button');
       var send=function(){
         var t=input.value.trim(); if(!t)return; btn.disabled=true;
-        run('addComment',r.reflectionId,user.name,user.password,t,user.classId).then(function(list){
+        run('addComment',r.reflectionId,user.name,user.password,t,user.classId,current.board?current.board.boardId:null).then(function(list){
           r.comments=list; renderComments(r,d); lastSig=computeSig();
         }).catch(function(e){err(e);btn.disabled=false;});
       };
@@ -918,11 +963,11 @@ var App = (function(){
           run('getBoardData',boardId,user?user.name:null).then(function(data){
             if(!current.board||current.board.boardId!==boardId) return;
             if(busy()) return; // 取得中に操作が始まったら今回はスキップ
-            applyBoardData(data); setSeen(boardId, current.cards.length); renderBoard();
+            reconcileBoard(data); setSeen(boardId, current.cards.length);
           }).catch(function(){});
         }
       }).catch(function(){});
-    },7000);
+    },5000);
   }
   function stopPolling(){ if(pollTimer){ clearInterval(pollTimer); pollTimer=null; } }
 

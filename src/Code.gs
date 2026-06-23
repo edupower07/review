@@ -15,7 +15,7 @@ var PROP_SCHEMA_VERSION = 'SCHEMA_VERSION';
 var SCHEMA_VERSION = '9';
 // クライアント(Index.html)の APP_BUILD と必ず一致させること。
 // デプロイ更新忘れ（古いコードが動いている状態）を検知するために使う。
-var APP_BUILD = '17';
+var APP_BUILD = '18';
 
 var SHEET_STUDENTS = 'Students';
 var SHEET_BOARDS = 'Boards';
@@ -620,6 +620,7 @@ function createSection(boardId, name, teacherPassword, color) {
   var maxOrder = 0;
   getSections(boardId).forEach(function (s) { if (s.sortOrder > maxOrder) maxOrder = s.sortOrder; });
   getSheet_(SHEET_SECTIONS).appendRow([genId_('s'), boardId, name, maxOrder + 1, new Date(), String(color || '')]);
+  clearSig_(boardId);
   return getSections(boardId);
 }
 
@@ -630,6 +631,7 @@ function setSectionColor(sectionId, color, teacherPassword) {
   var s = readSheet_(SHEET_SECTIONS).filter(function (x) { return x.sectionId === sectionId; })[0];
   if (!s) throw new Error('セクションが見つかりません。');
   sheet.getRange(s._row, SHEET_DEFS[SHEET_SECTIONS].indexOf('color') + 1).setValue(String(color || ''));
+  clearSig_(s.boardId);
   return getSections(s.boardId);
 }
 
@@ -642,6 +644,7 @@ function renameSection(sectionId, name, teacherPassword) {
   var s = readSheet_(SHEET_SECTIONS).filter(function (x) { return x.sectionId === sectionId; })[0];
   if (!s) throw new Error('セクションが見つかりません。');
   sheet.getRange(s._row, SHEET_DEFS[SHEET_SECTIONS].indexOf('name') + 1).setValue(name);
+  clearSig_(s.boardId);
   return getSections(s.boardId);
 }
 
@@ -658,6 +661,7 @@ function deleteSection(sectionId, teacherPassword) {
     if (r.sectionId === sectionId) sheet.getRange(r._row, secCol).setValue('');
   });
   deleteRowsWhere_(SHEET_SECTIONS, 'sectionId', sectionId);
+  clearSig_(boardId);
   return getSections(boardId);
 }
 
@@ -743,6 +747,17 @@ function cardCompare_(a, b) {
  * これが前回と変われば、クライアントは getBoardData を取り直して再描画する。
  */
 function getBoardSignature(boardId) {
+  // 多数の児童が同時にポーリングしても重い計算を共有できるよう、短時間キャッシュする。
+  // 書き込み時に clearSig_ で無効化するので、変更は即座に反映される。
+  var cache = CacheService.getScriptCache();
+  var key = 'sig_' + boardId;
+  var hit = cache.get(key);
+  if (hit != null) return hit;
+  var sig = computeBoardSignature_(boardId);
+  try { cache.put(key, sig, 8); } catch (e) {}
+  return sig;
+}
+function computeBoardSignature_(boardId) {
   var refCount = 0, maxMs = 0;
   var refIds = {};
   readSheet_(SHEET_REFLECTIONS).forEach(function (r) {
@@ -757,6 +772,11 @@ function getBoardSignature(boardId) {
   var likeCount = readSheet_(SHEET_LIKES).filter(function (l) { return refIds[l.reflectionId]; }).length;
   var comCount = readSheet_(SHEET_COMMENTS).filter(function (c) { return refIds[c.reflectionId]; }).length;
   return refCount + '|' + maxMs + '|' + secCount + '|' + likeCount + '|' + comCount;
+}
+/** ボードのシグネチャ・キャッシュを無効化（書き込み後に呼ぶと即反映される）。 */
+function clearSig_(boardId) {
+  if (!boardId) return;
+  try { CacheService.getScriptCache().remove('sig_' + boardId); } catch (e) {}
 }
 
 /**
@@ -799,6 +819,7 @@ function postReflection(boardId, sectionId, studentName, password, title, text, 
     id, boardId, author, text, url, fileId, color || '#fff7c0', maxOrder + 1, now, sectionId, mediaType, now, false, title,
     linkObj ? JSON.stringify(linkObj) : ''
   ]);
+  clearSig_(boardId);
   // 速度重視：作成したカード1枚だけを返す（クライアントは部分描画する）
   return {
     card: {
@@ -872,6 +893,7 @@ function editReflection(reflectionId, studentName, password, teacherPassword, ti
 
   var now = new Date();
   sheet.getRange(r._row, def.indexOf('updatedAt') + 1).setValue(now);
+  clearSig_(r.boardId);
   // 速度重視：変更後の値だけ返す（クライアントは該当カードを差し替える）
   var newUrl = (media && media.data) ? readCell_(sheet, r._row, def, 'photoUrl') : (removeMedia ? '' : r.photoUrl);
   var newType = (media && media.data) ? readCell_(sheet, r._row, def, 'mediaType') : (removeMedia ? '' : (r.mediaType || (r.photoUrl ? 'image' : '')));
@@ -905,6 +927,7 @@ function togglePin(reflectionId, studentName, password, teacherPassword, classId
   var pinned = !(r.pinned === true || r.pinned === 'true' || r.pinned === 1);
   sheet.getRange(r._row, def.indexOf('pinned') + 1).setValue(pinned);
   sheet.getRange(r._row, def.indexOf('updatedAt') + 1).setValue(new Date());
+  clearSig_(r.boardId);
   return { pinned: pinned };
 }
 
@@ -918,6 +941,7 @@ function deleteReflection(reflectionId, studentName, password, teacherPassword, 
   deleteRowsWhere_(SHEET_COMMENTS, 'reflectionId', reflectionId);
   deleteRowsWhere_(SHEET_LIKES, 'reflectionId', reflectionId);
   deleteRowsWhere_(SHEET_REFLECTIONS, 'reflectionId', reflectionId);
+  clearSig_(r.boardId);
   return true;
 }
 
@@ -935,6 +959,7 @@ function updateLayout(boardId, items) {
     sheet.getRange(row, orderCol).setValue(idx + 1);
     sheet.getRange(row, secCol).setValue(it.sectionId || '');
   });
+  clearSig_(boardId);
   return true;
 }
 
@@ -960,8 +985,9 @@ function updateOrder(boardId, orderedIds) {
 }
 
 // --- リアクション（複数種類） ---
-function toggleReaction(reflectionId, studentName, password, type, classId) {
+function toggleReaction(reflectionId, studentName, password, type, classId, boardId) {
   if (!verifyStudent_(studentName, password, classId)) throw new Error('ログイン情報が正しくありません。');
+  clearSig_(boardId);
   type = String(type || '❤');
   if (REACTIONS.indexOf(type) < 0) type = '❤';
   var sheet = getSheet_(SHEET_LIKES);
@@ -986,12 +1012,13 @@ function toggleReaction(reflectionId, studentName, password, type, classId) {
 }
 
 // --- コメント ---
-function addComment(reflectionId, author, password, text, classId) {
+function addComment(reflectionId, author, password, text, classId, boardId) {
   if (!verifyStudent_(author, password, classId)) throw new Error('ログイン情報が正しくありません。');
   text = String(text || '').trim();
   if (!text) throw new Error('コメントを入力してください。');
   var id = genId_('c');
   getSheet_(SHEET_COMMENTS).appendRow([id, reflectionId, author, text, new Date()]);
+  clearSig_(boardId);
   return readSheet_(SHEET_COMMENTS)
     .filter(function (c) { return c.reflectionId === reflectionId; })
     .sort(function (a, b) { return new Date(a.createdAt) - new Date(b.createdAt); })
