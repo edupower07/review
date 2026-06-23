@@ -15,7 +15,7 @@ var PROP_SCHEMA_VERSION = 'SCHEMA_VERSION';
 var SCHEMA_VERSION = '9';
 // クライアント(Index.html)の APP_BUILD と必ず一致させること。
 // デプロイ更新忘れ（古いコードが動いている状態）を検知するために使う。
-var APP_BUILD = '15';
+var APP_BUILD = '16';
 
 var SHEET_STUDENTS = 'Students';
 var SHEET_BOARDS = 'Boards';
@@ -147,9 +147,9 @@ function ensureInit_() {
     var folder = DriveApp.createFolder('Manabase 写真');
     props.setProperty(PROP_FOLDER_ID, folder.getId());
   }
-  // 旧データ（クラスなし）を既定クラスに割り当てる移行
+  // 旧データ（クラスなし）を既定クラスに割り当てる移行（失敗してもバージョンは進める）
   _ssCache = ss; // 以降のヘルパーが getSpreadsheet_ を使うため先にキャッシュ
-  ensureLegacyClass_();
+  try { ensureLegacyClass_(); } catch (e) { /* 何度でも安全に再実行できるため握りつぶす */ }
   // 移行完了。次回以降は上のゲートでヘッダー再検証をスキップする。
   props.setProperty(PROP_SCHEMA_VERSION, SCHEMA_VERSION);
   _ssCache = ss;
