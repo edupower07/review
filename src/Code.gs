@@ -12,10 +12,10 @@ var PROP_TEACHER_SALT = 'TEACHER_SALT';
 var PROP_TEACHER_NAME = 'TEACHER_NAME';
 var PROP_SCHEMA_VERSION = 'SCHEMA_VERSION';
 // SHEET_DEFS を変更したら必ずこの版数を上げる（次回アクセス時に1回だけ移行が走る）
-var SCHEMA_VERSION = '8';
+var SCHEMA_VERSION = '9';
 // クライアント(Index.html)の APP_BUILD と必ず一致させること。
 // デプロイ更新忘れ（古いコードが動いている状態）を検知するために使う。
-var APP_BUILD = '13';
+var APP_BUILD = '14';
 
 var SHEET_STUDENTS = 'Students';
 var SHEET_BOARDS = 'Boards';
@@ -23,11 +23,14 @@ var SHEET_SECTIONS = 'Sections';
 var SHEET_REFLECTIONS = 'Reflections';
 var SHEET_COMMENTS = 'Comments';
 var SHEET_LIKES = 'Likes';
+var SHEET_CLASSES = 'Classes';
 
 var SHEET_DEFS = {};
-SHEET_DEFS[SHEET_STUDENTS] = ['number', 'name', 'salt', 'passwordHash', 'createdAt'];
-// 末尾の archived は後から追加した列（true で児童のボード一覧から非表示。データは保持）
-SHEET_DEFS[SHEET_BOARDS] = ['boardId', 'subject', 'unit', 'date', 'title', 'createdAt', 'archived'];
+SHEET_DEFS[SHEET_CLASSES] = ['classId', 'name', 'sortOrder', 'createdAt'];
+// 末尾の classId は後から追加した列（どのクラスの生徒か）
+SHEET_DEFS[SHEET_STUDENTS] = ['number', 'name', 'salt', 'passwordHash', 'createdAt', 'classId'];
+// 末尾の archived / classId は後から追加した列
+SHEET_DEFS[SHEET_BOARDS] = ['boardId', 'subject', 'unit', 'date', 'title', 'createdAt', 'archived', 'classId'];
 // 末尾の color は後から追加した列（セクションの色分け用）
 SHEET_DEFS[SHEET_SECTIONS] = ['sectionId', 'boardId', 'name', 'sortOrder', 'createdAt', 'color'];
 // 末尾の sectionId / mediaType / updatedAt / pinned / title / link は後から追加した列（既存データは移行で保持）
@@ -144,10 +147,45 @@ function ensureInit_() {
     var folder = DriveApp.createFolder('Manabase 写真');
     props.setProperty(PROP_FOLDER_ID, folder.getId());
   }
+  // 旧データ（クラスなし）を既定クラスに割り当てる移行
+  _ssCache = ss; // 以降のヘルパーが getSpreadsheet_ を使うため先にキャッシュ
+  ensureLegacyClass_();
   // 移行完了。次回以降は上のゲートでヘッダー再検証をスキップする。
   props.setProperty(PROP_SCHEMA_VERSION, SCHEMA_VERSION);
   _ssCache = ss;
   return ss;
+}
+
+/**
+ * クラス導入前のデータ（classId 空）を、既定クラスにまとめて割り当てる。
+ * 既存の生徒・ボードがあるのにクラスが無い場合のみ「1組」を作って割り当てる。
+ */
+function ensureLegacyClass_() {
+  var classSheet = getSheet_(SHEET_CLASSES);
+  var classes = readSheet_(SHEET_CLASSES);
+  var students = readSheet_(SHEET_STUDENTS);
+  var boards = readSheet_(SHEET_BOARDS);
+
+  var orphanStudents = students.filter(function (s) { return !s.classId; });
+  var orphanBoards = boards.filter(function (b) { return !b.classId; });
+  if (!orphanStudents.length && !orphanBoards.length) return;
+
+  // 割り当て先クラス：既存があれば先頭、無ければ「1組」を作成
+  var targetId;
+  if (classes.length) {
+    targetId = classes[0].classId;
+  } else {
+    targetId = genId_('cls');
+    classSheet.appendRow([targetId, '1組', 1, new Date()]);
+  }
+
+  var sSheet = getSheet_(SHEET_STUDENTS);
+  var sCol = SHEET_DEFS[SHEET_STUDENTS].indexOf('classId') + 1;
+  orphanStudents.forEach(function (s) { sSheet.getRange(s._row, sCol).setValue(targetId); });
+
+  var bSheet = getSheet_(SHEET_BOARDS);
+  var bCol = SHEET_DEFS[SHEET_BOARDS].indexOf('classId') + 1;
+  orphanBoards.forEach(function (b) { bSheet.getRange(b._row, bCol).setValue(targetId); });
 }
 
 /** 記録済みIDからスプレッドシートを開く。無ければ null。 */
@@ -231,14 +269,60 @@ function deleteRowsWhere_(name, key, value) {
 
 // ============================ ログイン / 名簿 ============================
 
-/** 起動時情報：名簿（パスワード設定済みか）と先生パスワード設定状況。 */
+/** 起動時情報：クラス一覧と先生パスワード設定状況。 */
 function getLoginInfo() {
-  var students = readSheet_(SHEET_STUDENTS).map(function (s) {
-    return { number: s.number, name: s.name, hasPassword: !!s.passwordHash };
-  });
-  students.sort(function (a, b) { return (a.number || 0) - (b.number || 0); });
   var teacherSet = !!PropertiesService.getScriptProperties().getProperty(PROP_TEACHER_HASH);
-  return { students: students, teacherSet: teacherSet, build: APP_BUILD };
+  return { classes: getClasses(), teacherSet: teacherSet, build: APP_BUILD };
+}
+
+/** クラス内の名簿（クラス選択後に取得）。 */
+function getClassStudents(classId) {
+  var students = readSheet_(SHEET_STUDENTS)
+    .filter(function (s) { return String(s.classId || '') === String(classId || ''); })
+    .map(function (s) { return { number: s.number, name: s.name, hasPassword: !!s.passwordHash }; });
+  students.sort(function (a, b) { return (a.number || 0) - (b.number || 0); });
+  return students;
+}
+
+// ============================ クラス ============================
+
+function getClasses() {
+  var classes = readSheet_(SHEET_CLASSES).map(function (c) {
+    return { classId: c.classId, name: c.name, sortOrder: Number(c.sortOrder) || 0 };
+  });
+  classes.sort(function (a, b) { return a.sortOrder - b.sortOrder; });
+  return classes;
+}
+
+function createClass(name, teacherPassword) {
+  if (!isTeacher_(teacherPassword)) throw new Error('クラスの操作は先生のみ可能です。');
+  name = String(name || '').trim();
+  if (!name) throw new Error('クラス名を入力してください。');
+  var maxOrder = 0;
+  getClasses().forEach(function (c) { if (c.sortOrder > maxOrder) maxOrder = c.sortOrder; });
+  getSheet_(SHEET_CLASSES).appendRow([genId_('cls'), name, maxOrder + 1, new Date()]);
+  return getClasses();
+}
+
+function renameClass(classId, name, teacherPassword) {
+  if (!isTeacher_(teacherPassword)) throw new Error('クラスの操作は先生のみ可能です。');
+  name = String(name || '').trim();
+  if (!name) throw new Error('クラス名を入力してください。');
+  var sheet = getSheet_(SHEET_CLASSES);
+  var c = readSheet_(SHEET_CLASSES).filter(function (x) { return x.classId === classId; })[0];
+  if (!c) throw new Error('クラスが見つかりません。');
+  sheet.getRange(c._row, SHEET_DEFS[SHEET_CLASSES].indexOf('name') + 1).setValue(name);
+  return getClasses();
+}
+
+/** クラス削除（先生のみ）。生徒・ボードが残っている場合は削除できない。 */
+function deleteClass(classId, teacherPassword) {
+  if (!isTeacher_(teacherPassword)) throw new Error('クラスの操作は先生のみ可能です。');
+  var hasStudents = readSheet_(SHEET_STUDENTS).some(function (s) { return String(s.classId || '') === String(classId); });
+  var hasBoards = readSheet_(SHEET_BOARDS).some(function (b) { return String(b.classId || '') === String(classId); });
+  if (hasStudents || hasBoards) throw new Error('このクラスには生徒またはボードが残っています。先に移動か削除をしてください。');
+  deleteRowsWhere_(SHEET_CLASSES, 'classId', classId);
+  return getClasses();
 }
 
 /** デプロイ状態の診断用。クライアントの APP_BUILD と一致していれば最新。 */
@@ -247,12 +331,12 @@ function getServerInfo() {
 }
 
 /** 生徒ログイン。初回（パスワード未設定）はここで設定します。 */
-function studentLogin(name, password) {
+function studentLogin(classId, name, password) {
   password = String(password || '');
   if (password.length < 1) throw new Error('パスワードを入力してください。');
   var sheet = getSheet_(SHEET_STUDENTS);
   var rows = readSheet_(SHEET_STUDENTS);
-  var st = rows.filter(function (r) { return r.name === name; })[0];
+  var st = rows.filter(function (r) { return r.name === name && String(r.classId || '') === String(classId || ''); })[0];
   if (!st) throw new Error('名簿に見つかりません。');
 
   var headers = SHEET_DEFS[SHEET_STUDENTS];
@@ -321,33 +405,41 @@ function setTeacherPassword(newPassword, teacherPassword) {
   return { ok: true };
 }
 
-/** 生徒の本人確認（投稿・いいね等の操作前に呼ぶ簡易チェック）。 */
-function verifyStudent_(name, password) {
-  var st = readSheet_(SHEET_STUDENTS).filter(function (r) { return r.name === name; })[0];
+/** 生徒の本人確認（投稿・いいね等の操作前に呼ぶ簡易チェック）。classId は任意（あれば厳密化）。 */
+function verifyStudent_(name, password, classId) {
+  var st = readSheet_(SHEET_STUDENTS).filter(function (r) {
+    if (r.name !== name) return false;
+    if (classId != null && classId !== '' && String(r.classId || '') !== String(classId)) return false;
+    return true;
+  })[0];
   if (!st || !st.passwordHash) return false;
   return sha256_(st.salt + password) === st.passwordHash;
 }
 
 // --- 先生による名簿管理 ---
 
-function getStudents() {
-  var students = readSheet_(SHEET_STUDENTS).map(function (s) {
-    return { number: s.number, name: s.name, hasPassword: !!s.passwordHash };
-  });
+function getStudents(classId) {
+  var students = readSheet_(SHEET_STUDENTS)
+    .filter(function (s) { return String(s.classId || '') === String(classId || ''); })
+    .map(function (s) { return { number: s.number, name: s.name, hasPassword: !!s.passwordHash }; });
   students.sort(function (a, b) { return (a.number || 0) - (b.number || 0); });
   return students;
 }
 
-function addStudent(number, name) {
+function addStudent(number, name, classId) {
   name = String(name || '').trim();
   if (!name) throw new Error('名前を入力してください。');
-  getSheet_(SHEET_STUDENTS).appendRow([number || nextNumber_(), name, '', '', new Date()]);
-  return getStudents();
+  if (!classId) throw new Error('クラスを選択してください。');
+  getSheet_(SHEET_STUDENTS).appendRow([number || nextNumber_(classId), name, '', '', new Date(), classId]);
+  return getStudents(classId);
 }
 
-function nextNumber_() {
+function nextNumber_(classId) {
   var max = 0;
-  readSheet_(SHEET_STUDENTS).forEach(function (s) { if (Number(s.number) > max) max = Number(s.number); });
+  readSheet_(SHEET_STUDENTS).forEach(function (s) {
+    if (String(s.classId || '') !== String(classId || '')) return;
+    if (Number(s.number) > max) max = Number(s.number);
+  });
   return max + 1;
 }
 
@@ -355,10 +447,11 @@ function nextNumber_() {
  * Excel などからの一括貼り付け。タブ / カンマ / 空白区切り、1行1名。
  * 「1<TAB>山田太郎」「山田太郎<TAB>1」「山田太郎」いずれも可。
  */
-function importStudents(text) {
+function importStudents(text, classId) {
+  if (!classId) throw new Error('クラスを選択してください。');
   var lines = String(text || '').split(/\r?\n/);
   var sheet = getSheet_(SHEET_STUDENTS);
-  var auto = nextNumber_();
+  var auto = nextNumber_(classId);
   var rows = [];
   lines.forEach(function (line) {
     line = line.replace(/　/g, ' ').trim();
@@ -375,26 +468,34 @@ function importStudents(text) {
     }
     if (!name) return;
     if (num === '') num = auto++;
-    rows.push([num, name, '', '', new Date()]);
+    rows.push([num, name, '', '', new Date(), classId]);
   });
-  if (rows.length) sheet.getRange(sheet.getLastRow() + 1, 1, rows.length, 5).setValues(rows);
-  return getStudents();
+  if (rows.length) sheet.getRange(sheet.getLastRow() + 1, 1, rows.length, rows[0].length).setValues(rows);
+  return getStudents(classId);
 }
 
-function removeStudent(name) {
-  deleteRowsWhere_(SHEET_STUDENTS, 'name', name);
-  return getStudents();
+function removeStudent(name, classId) {
+  var sheet = getSheet_(SHEET_STUDENTS);
+  var values = sheet.getDataRange().getValues();
+  var headers = values[0];
+  var nCol = headers.indexOf('name'), cCol = headers.indexOf('classId');
+  for (var i = values.length - 1; i >= 1; i--) {
+    if (values[i][nCol] === name && String(values[i][cCol] || '') === String(classId || '')) sheet.deleteRow(i + 1);
+  }
+  return getStudents(classId);
 }
 
 /** 生徒のパスワードをリセット（次回ログイン時に再設定）。 */
-function resetStudentPassword(name) {
+function resetStudentPassword(name, classId) {
   var sheet = getSheet_(SHEET_STUDENTS);
-  var st = readSheet_(SHEET_STUDENTS).filter(function (r) { return r.name === name; })[0];
-  if (!st) return getStudents();
+  var st = readSheet_(SHEET_STUDENTS).filter(function (r) {
+    return r.name === name && String(r.classId || '') === String(classId || '');
+  })[0];
+  if (!st) return getStudents(classId);
   var headers = SHEET_DEFS[SHEET_STUDENTS];
   sheet.getRange(st._row, headers.indexOf('salt') + 1).setValue('');
   sheet.getRange(st._row, headers.indexOf('passwordHash') + 1).setValue('');
-  return getStudents();
+  return getStudents(classId);
 }
 
 // ============================ ボード ============================
@@ -403,8 +504,9 @@ function resetStudentPassword(name) {
  * ボード一覧。includeArchived=true で非表示（アーカイブ）ボードも含めます。
  * 児童側（boardList）は false で呼ぶため、非表示ボードは一覧に出ません。
  */
-function getBoards(includeArchived) {
+function getBoards(includeArchived, classId) {
   var boards = readSheet_(SHEET_BOARDS).map(rowToBoard_);
+  if (classId != null && classId !== '') boards = boards.filter(function (b) { return String(b.classId || '') === String(classId); });
   if (!includeArchived) boards = boards.filter(function (b) { return !b.archived; });
   // 未読バッジ用に各ボードの投稿数を付与（Reflections を1回読むだけ）
   var counts = {};
@@ -422,7 +524,8 @@ function rowToBoard_(r) {
     date: fmtDate_(r.date),
     title: r.title,
     createdAt: toMs_(r.createdAt),
-    archived: r.archived === true || r.archived === 'true' || r.archived === 1
+    archived: r.archived === true || r.archived === 'true' || r.archived === 1,
+    classId: r.classId || ''
   };
 }
 
@@ -457,18 +560,19 @@ function getBoard(boardId) {
   return b ? rowToBoard_(b) : null;
 }
 
-function createBoard(subject, unit, date, title) {
+function createBoard(subject, unit, date, title, classId) {
   subject = String(subject || '').trim();
   unit = String(unit || '').trim();
   if (!subject) throw new Error('教科を選択してください。');
   if (!unit) throw new Error('単元名を入力してください。');
+  if (!classId) throw new Error('クラスを選択してください。');
   date = String(date || '').trim();
   if (!date) date = Utilities.formatDate(new Date(), 'Asia/Tokyo', 'yyyy-MM-dd');
   title = String(title || '').trim();
   if (!title) title = unit;
   var id = genId_('b');
-  // 列順は SHEET_DEFS[SHEET_BOARDS] と一致させること（boardId, subject, unit, date, title, createdAt, archived）
-  getSheet_(SHEET_BOARDS).appendRow([id, subject, unit, "'" + date, title, new Date(), false]);
+  // 列順は SHEET_DEFS[SHEET_BOARDS] と一致させること
+  getSheet_(SHEET_BOARDS).appendRow([id, subject, unit, "'" + date, title, new Date(), false, classId]);
   var created = getBoard(id);
   if (!created) throw new Error('ボードの作成に失敗しました。もう一度お試しください。');
   // 既定セクションを1つ用意しておく（最初から投稿できるように）
@@ -651,13 +755,13 @@ function getBoardSignature(boardId) {
 /**
  * 投稿。media は { data(base64), mimeType, filename, kind:'image'|'video' } または null。
  */
-function postReflection(boardId, sectionId, studentName, password, title, text, color, media, link, teacherPassword) {
+function postReflection(boardId, sectionId, studentName, password, title, text, color, media, link, teacherPassword, classId) {
   // 先生は自分の表示名で投稿できる。それ以外は生徒の本人確認。
   var author;
   if (teacherPassword && isTeacher_(teacherPassword)) {
     author = getTeacherName_();
   } else {
-    if (!verifyStudent_(studentName, password)) throw new Error('ログイン情報が正しくありません。');
+    if (!verifyStudent_(studentName, password, classId)) throw new Error('ログイン情報が正しくありません。');
     author = studentName;
   }
   title = String(title || '').trim();
@@ -720,11 +824,11 @@ function sanitizeLink_(link) {
  * 投稿の編集。本人 または 先生のみ。
  * media を渡せば差し替え、removeMedia=true なら添付を削除、どちらも無ければ本文/色のみ更新。
  */
-function editReflection(reflectionId, studentName, password, teacherPassword, title, text, color, media, removeMedia, link, removeLink) {
+function editReflection(reflectionId, studentName, password, teacherPassword, title, text, color, media, removeMedia, link, removeLink, classId) {
   var sheet = getSheet_(SHEET_REFLECTIONS);
   var r = readSheet_(SHEET_REFLECTIONS).filter(function (x) { return x.reflectionId === reflectionId; })[0];
   if (!r) throw new Error('投稿が見つかりません。');
-  var allowed = isTeacher_(teacherPassword) || (r.studentName === studentName && verifyStudent_(studentName, password));
+  var allowed = isTeacher_(teacherPassword) || (r.studentName === studentName && verifyStudent_(studentName, password, classId));
   if (!allowed) throw new Error('編集する権限がありません。');
 
   var def = SHEET_DEFS[SHEET_REFLECTIONS];
@@ -784,11 +888,11 @@ function readCell_(sheet, row, def, key) {
 }
 
 /** ピン留めの切り替え。本人 または 先生。 */
-function togglePin(reflectionId, studentName, password, teacherPassword) {
+function togglePin(reflectionId, studentName, password, teacherPassword, classId) {
   var sheet = getSheet_(SHEET_REFLECTIONS);
   var r = readSheet_(SHEET_REFLECTIONS).filter(function (x) { return x.reflectionId === reflectionId; })[0];
   if (!r) throw new Error('投稿が見つかりません。');
-  var allowed = isTeacher_(teacherPassword) || (r.studentName === studentName && verifyStudent_(studentName, password));
+  var allowed = isTeacher_(teacherPassword) || (r.studentName === studentName && verifyStudent_(studentName, password, classId));
   if (!allowed) throw new Error('ピン留めする権限がありません。');
   var def = SHEET_DEFS[SHEET_REFLECTIONS];
   var pinned = !(r.pinned === true || r.pinned === 'true' || r.pinned === 1);
@@ -798,10 +902,10 @@ function togglePin(reflectionId, studentName, password, teacherPassword) {
 }
 
 /** 削除：本人 または 先生。 */
-function deleteReflection(reflectionId, studentName, password, teacherPassword) {
+function deleteReflection(reflectionId, studentName, password, teacherPassword, classId) {
   var r = readSheet_(SHEET_REFLECTIONS).filter(function (x) { return x.reflectionId === reflectionId; })[0];
   if (!r) return true;
-  var allowed = isTeacher_(teacherPassword) || (r.studentName === studentName && verifyStudent_(studentName, password));
+  var allowed = isTeacher_(teacherPassword) || (r.studentName === studentName && verifyStudent_(studentName, password, classId));
   if (!allowed) throw new Error('削除する権限がありません。');
   if (r.photoFileId) { try { DriveApp.getFileById(r.photoFileId).setTrashed(true); } catch (e) {} }
   deleteRowsWhere_(SHEET_COMMENTS, 'reflectionId', reflectionId);
@@ -849,8 +953,8 @@ function updateOrder(boardId, orderedIds) {
 }
 
 // --- リアクション（複数種類） ---
-function toggleReaction(reflectionId, studentName, password, type) {
-  if (!verifyStudent_(studentName, password)) throw new Error('ログイン情報が正しくありません。');
+function toggleReaction(reflectionId, studentName, password, type, classId) {
+  if (!verifyStudent_(studentName, password, classId)) throw new Error('ログイン情報が正しくありません。');
   type = String(type || '❤');
   if (REACTIONS.indexOf(type) < 0) type = '❤';
   var sheet = getSheet_(SHEET_LIKES);
@@ -875,8 +979,8 @@ function toggleReaction(reflectionId, studentName, password, type) {
 }
 
 // --- コメント ---
-function addComment(reflectionId, author, password, text) {
-  if (!verifyStudent_(author, password)) throw new Error('ログイン情報が正しくありません。');
+function addComment(reflectionId, author, password, text, classId) {
+  if (!verifyStudent_(author, password, classId)) throw new Error('ログイン情報が正しくありません。');
   text = String(text || '').trim();
   if (!text) throw new Error('コメントを入力してください。');
   var id = genId_('c');
@@ -955,12 +1059,16 @@ function exportBoard(boardId) {
   return getBoardData(boardId, null);
 }
 
-/** 児童別の出力データ：その児童の全ボードにわたる振り返りを時系列で。 */
-function exportStudent(studentName) {
+/** 児童別の出力データ：その児童の（クラス内）全ボードにわたる振り返りを時系列で。 */
+function exportStudent(studentName, classId) {
   var boards = {};
   readSheet_(SHEET_BOARDS).forEach(function (b) { boards[b.boardId] = rowToBoard_(b); });
   var refs = readSheet_(SHEET_REFLECTIONS)
-    .filter(function (r) { return r.studentName === studentName; })
+    .filter(function (r) {
+      if (r.studentName !== studentName) return false;
+      if (classId) { var bd = boards[r.boardId]; if (!bd || String(bd.classId || '') !== String(classId)) return false; }
+      return true;
+    })
     .sort(function (a, b) { return new Date(a.createdAt) - new Date(b.createdAt); })
     .map(function (r) {
       var bd = boards[r.boardId] || {};

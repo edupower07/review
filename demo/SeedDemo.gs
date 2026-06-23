@@ -11,8 +11,8 @@
  *   3. 実行ログ（表示 → ログ）に、ログイン用のパスワードが表示されます。
  *
  * 【ログイン情報（デモ）】
- *   ・生徒：名簿の名前を選んで、パスワードは全員「1234」
- *   ・先生：パスワード「demo1234」／表示名「福田先生」
+ *   ・生徒：クラス（5年1組/5年2組）→ 名前を選んで、パスワードは全員「1234」
+ *   ・先生：パスワード「demo1234」／表示名「福田先生」（2クラスを管理）
  *     （※先生パスワードが未設定のときだけ設定します。設定済みなら変更しません）
  *
  * 【作り直したいとき】
@@ -36,18 +36,28 @@ function seedDemoData() {
   }
   props.setProperty(PROP_TEACHER_NAME, '福田先生');
 
+  // ---- クラス（2クラス）----
+  var cls1 = demoClass_('5年1組', 1);
+  var cls2 = demoClass_('5年2組', 2);
+
   // ---- 生徒名簿（パスワードは全員 1234）----
-  var roster = [
+  var roster1 = [
     [1, '佐藤 あおい'], [2, '鈴木 はると'], [3, '高橋 ゆい'], [4, '田中 そうた'],
     [5, '伊藤 めい'], [6, '渡辺 りく'], [7, '山本 ひなた'], [8, '中村 かなと'],
     [9, '小林 さくら'], [10, '加藤 ゆうと'], [11, '吉田 みお'], [12, '山田 はる']
   ];
-  roster.forEach(function (p) { addDemoStudent_(p[0], p[1], '1234'); });
+  roster1.forEach(function (p) { addDemoStudent_(p[0], p[1], '1234', cls1); });
+
+  var roster2 = [
+    [1, '松本 れん'], [2, '井上 ひな'], [3, '木村 そら'], [4, '林 つむぎ'],
+    [5, '清水 いつき'], [6, '森 あかり']
+  ];
+  roster2.forEach(function (p) { addDemoStudent_(p[0], p[1], '1234', cls2); });
 
   var T = '福田先生';
 
-  // ====================== ボード1：理科 ======================
-  var b1 = demoBoard_('理科', 'ふりこのきまり', 'ふりこのきまり', 1, false);
+  // ====================== ボード1：理科（5年1組）======================
+  var b1 = demoBoard_('理科', 'ふりこのきまり', 'ふりこのきまり', 1, false, cls1);
   var b1s1 = demoSection_(b1, '気づいたこと', 1, '#2faf6b');
   var b1s2 = demoSection_(b1, 'ぎもん・もっと知りたい', 2, '#e08a3c');
   var b1s3 = demoSection_(b1, 'まとめ', 3, '#3f7fd6');
@@ -102,8 +112,8 @@ function seedDemoData() {
     { order: 2, minsAgo: 15 });
   demoLike_(r, '高橋 ゆい', '👍'); demoLike_(r, '伊藤 めい', '❤');
 
-  // ====================== ボード2：国語 ======================
-  var b2 = demoBoard_('国語', 'ごんぎつね', 'ごんぎつね', 3, false);
+  // ====================== ボード2：国語（5年1組）======================
+  var b2 = demoBoard_('国語', 'ごんぎつね', 'ごんぎつね', 3, false, cls1);
   var b2s1 = demoSection_(b2, '心にのこった場面', 1, '#d24b8c');
   var b2s2 = demoSection_(b2, '登場人物の気もち', 2, '#8c5bd0');
   var b2s3 = demoSection_(b2, 'すきな一文', 3, '#2faf6b');
@@ -140,8 +150,8 @@ function seedDemoData() {
     { order: 1, minsAgo: 1100 });
   demoLike_(r, '中村 かなと', '👍'); demoComment_(r, T, '物語から大切なことを受け取りましたね。');
 
-  // ====================== ボード3：社会（リンク例あり）======================
-  var b3 = demoBoard_('社会', 'だれもがくらしやすいまち', 'だれもがくらしやすいまち', 5, false);
+  // ====================== ボード3：社会（5年1組・リンク例あり）======================
+  var b3 = demoBoard_('社会', 'だれもがくらしやすいまち', 'だれもがくらしやすいまち', 5, false, cls1);
   var b3s1 = demoSection_(b3, '見つけたくふう', 1, '#2796a8');
   var b3s2 = demoSection_(b3, '調べてわかったこと', 2, '#c8862a');
   var b3s3 = demoSection_(b3, 'みんなに伝えたいこと', 3, '#3f7fd6');
@@ -178,32 +188,55 @@ function seedDemoData() {
     { order: 1, minsAgo: 1600 });
   demoLike_(r, '山田 はる', '🤔'); demoComment_(r, '加藤 ゆうと', 'いっしょに調べたい！');
 
-  // ====================== ボード4：非表示（アーカイブ）の例 ======================
+  // ====================== ボード4：非表示（アーカイブ）の例（5年1組）======================
   // 児童のボード一覧には出ません。先生画面では「非表示」として確認・再表示できます。
-  demoBoard_('算数・数学', 'いろいろな単位（おわった単元）', 'いろいろな単位', 20, true);
+  demoBoard_('算数・数学', 'いろいろな単位（おわった単元）', 'いろいろな単位', 20, true, cls1);
+
+  // ====================== ボード5：5年2組 ======================
+  var c2b1 = demoBoard_('理科', 'こん虫のかんさつ', 'こん虫のかんさつ', 2, false, cls2);
+  var c2s1 = demoSection_(c2b1, '見つけたこと', 1, '#2faf6b');
+  var c2s2 = demoSection_(c2b1, 'ぎもん', 2, '#e08a3c');
+  r = demoPost_(c2b1, c2s1, '松本 れん', '', 'モンシロチョウのよう虫がキャベツの葉を食べていた。', '#fff7c0', { order: 1, minsAgo: 200 });
+  demoLike_(r, '井上 ひな', '❤'); demoLike_(r, '森 あかり', '👍');
+  r = demoPost_(c2b1, c2s1, '井上 ひな', '', 'アリは行列を作って同じ道を通っていた。', '#cfe3ff', { order: 2, minsAgo: 150 });
+  demoComment_(r, T, 'よく観察できましたね。');
+  r = demoPost_(c2b1, c2s2, '木村 そら', '', 'なぜチョウはひらひら飛ぶのかな？', '#ffe2bf', { order: 1, minsAgo: 100 });
+  demoLike_(r, '林 つむぎ', '🤔');
 
   Logger.log('✅ デモデータを投入しました。\n'
-    + '・生徒ログイン：名前を選んで パスワード「1234」\n'
+    + '・クラス：5年1組 / 5年2組\n'
+    + '・生徒ログイン：クラスを選び 名前を選んで パスワード「1234」\n'
     + '・先生ログイン：パスワード「demo1234」（表示名：福田先生）\n'
-    + '・ボード：理科／国語／社会（リンク例）＋ 非表示の例（算数）');
+    + '・5年1組：理科／国語／社会（リンク例）＋非表示の例（算数）／5年2組：理科');
   return 'done';
+}
+
+function demoClass_(name, order) {
+  var existing = readSheet_(SHEET_CLASSES).filter(function (c) { return c.name === name; })[0];
+  if (existing) return existing.classId;
+  var id = genId_('cls');
+  getSheet_(SHEET_CLASSES).appendRow([id, name, order || 1, new Date()]);
+  return id;
 }
 
 // ---- 低レベルの投入ヘルパー（列順は Code.gs の SHEET_DEFS と一致させる）----
 
-function addDemoStudent_(num, name, pw) {
-  var exists = readSheet_(SHEET_STUDENTS).some(function (s) { return s.name === name; });
+function addDemoStudent_(num, name, pw, classId) {
+  var exists = readSheet_(SHEET_STUDENTS).some(function (s) {
+    return s.name === name && String(s.classId || '') === String(classId || '');
+  });
   if (exists) return;
   var salt = newSalt_();
-  getSheet_(SHEET_STUDENTS).appendRow([num, name, salt, sha256_(salt + pw), new Date()]);
+  // 列順：number, name, salt, passwordHash, createdAt, classId
+  getSheet_(SHEET_STUDENTS).appendRow([num, name, salt, sha256_(salt + pw), new Date(), classId || '']);
 }
 
-function demoBoard_(subject, unit, title, daysAgo, archived) {
+function demoBoard_(subject, unit, title, daysAgo, archived, classId) {
   var id = genId_('b');
   var d = new Date(Date.now() - (daysAgo || 0) * 86400000);
   var ymd = Utilities.formatDate(d, 'Asia/Tokyo', 'yyyy-MM-dd');
-  // 列順：boardId, subject, unit, date, title, createdAt, archived
-  getSheet_(SHEET_BOARDS).appendRow([id, subject, unit, "'" + ymd, title || unit, d, !!archived]);
+  // 列順：boardId, subject, unit, date, title, createdAt, archived, classId
+  getSheet_(SHEET_BOARDS).appendRow([id, subject, unit, "'" + ymd, title || unit, d, !!archived, classId || '']);
   return id;
 }
 
@@ -244,7 +277,7 @@ function demoLike_(reflectionId, studentName, type) {
  */
 function clearAllData() {
   ensureInit_();
-  [SHEET_STUDENTS, SHEET_BOARDS, SHEET_SECTIONS, SHEET_REFLECTIONS, SHEET_COMMENTS, SHEET_LIKES]
+  [SHEET_CLASSES, SHEET_STUDENTS, SHEET_BOARDS, SHEET_SECTIONS, SHEET_REFLECTIONS, SHEET_COMMENTS, SHEET_LIKES]
     .forEach(function (name) {
       var sh = getSpreadsheet_().getSheetByName(name);
       if (!sh) return;

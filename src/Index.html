@@ -257,7 +257,7 @@
 // ============================================================
 var App = (function(){
   // サーバー(Code.gs)の APP_BUILD と必ず一致させること。ズレていれば「デプロイ未更新」を警告する。
-  var APP_BUILD = '13';
+  var APP_BUILD = '14';
   var COLORS = ['#fff7c0','#ffd1dc','#c8f0d0','#cfe3ff','#e8d6ff','#ffe2bf','#ffffff'];
   // セクションの色分け用パレット（先生が選ぶ）
   var SECTION_COLORS = ['#e8554e','#e08a3c','#d9a400','#2faf6b','#2796a8','#3f7fd6','#8c5bd0','#d24b8c','#7a8b3c','#6a7a8c'];
@@ -327,40 +327,72 @@ var App = (function(){
     if(user){ boardList(); return; }
     login();
   }
+  var loginInfo=null, loginClass=null;
   function login(){
     stopPolling();
-    user=null; teacherPass=null; setCrumb(''); updateHeader();
+    user=null; teacherPass=null; loginClass=null; setCrumb(''); updateHeader();
     document.body.classList.add('login-mode');
-    // ヒーローは即時表示（読み込み待ちの体感を減らす）。名前一覧だけ後から差し込む。
+    // ヒーローは即時表示（読み込み待ちの体感を減らす）。中身だけ後から差し込む。
     view().innerHTML=
       '<div class="login-hero"><div style="width:100%;max-width:960px">'
       +'<div class="hero-top"><div class="hero-badge">📚</div>'
       +'<h1 class="hero-logo">Manabase</h1>'
       +'<div class="hero-sub">学びを、みんなで残そう。</div></div>'
-      +'<div class="login"><h2>自分の名前を選んでログイン</h2>'
-      +'<div id="nameGrid" class="name-grid"><div class="spinner" style="grid-column:1/-1">読み込み中…</div></div>'
+      +'<div class="login"><h2 id="loginTitle">クラスを選んでください</h2>'
+      +'<div id="loginBody"><div class="spinner">読み込み中…</div></div>'
       +'<div class="login-foot" id="loginFoot"></div>'
       +'</div></div></div>';
     run('getLoginInfo').then(function(info){
       checkBuild(info.build);
-      var grid=$('nameGrid'); if(grid) grid.innerHTML='';
-      if(!info.students.length){
-        if(grid) grid.innerHTML='<div class="empty" style="grid-column:1/-1">まだ名簿が登録されていません。<br>先生用ログインから名簿を登録してください。</div>';
-      }else if(grid){
-        info.students.forEach(function(s){
-          var btn=document.createElement('button');
-          btn.className='name-btn';
-          btn.innerHTML=(s.number?'<span class="num">'+esc(s.number)+'番</span>':'')+esc(s.name)
-            +(s.hasPassword?'':'<span class="lock">★初回</span>');
-          btn.addEventListener('click',function(){ pickName(s); });
-          grid.appendChild(btn);
-        });
-      }
+      loginInfo=info;
+      renderClassPicker();
       var foot=$('loginFoot');
       if(foot) foot.innerHTML='<button class="ghost-btn" onclick="App.teacherLogin()">🧑‍🏫 先生用ログイン'
         +(info.teacherSet?'':'（初回設定）')+'</button>';
     }).catch(err);
   }
+  function renderClassPicker(){
+    loginClass=null;
+    var title=$('loginTitle'); if(title) title.textContent='クラスを選んでください';
+    var body=$('loginBody'); if(!body)return;
+    var classes=(loginInfo&&loginInfo.classes)||[];
+    if(!classes.length){
+      body.innerHTML='<div class="empty">まだクラスがありません。<br>先生用ログインからクラスを作成してください。</div>';
+      return;
+    }
+    body.innerHTML='<div class="name-grid" id="classGrid"></div>';
+    var grid=$('classGrid');
+    classes.forEach(function(c){
+      var btn=document.createElement('button');
+      btn.className='name-btn'; btn.textContent=c.name;
+      btn.addEventListener('click',function(){ pickClass(c); });
+      grid.appendChild(btn);
+    });
+  }
+  function pickClass(c){
+    loginClass=c;
+    var title=$('loginTitle'); if(title) title.textContent=esc(c.name)+' のメンバー';
+    var body=$('loginBody'); if(!body)return;
+    body.innerHTML='<div class="spinner">読み込み中…</div>';
+    run('getClassStudents',c.classId).then(function(students){
+      body.innerHTML='<div style="margin-bottom:12px"><button class="ghost-btn" onclick="App.backToClasses()">← クラスを選びなおす</button></div>'
+        +'<div class="name-grid" id="nameGrid"></div>';
+      var grid=$('nameGrid');
+      if(!students.length){
+        grid.innerHTML='<div class="empty" style="grid-column:1/-1">このクラスにはまだ名簿がありません。</div>';
+        return;
+      }
+      students.forEach(function(s){
+        var btn=document.createElement('button');
+        btn.className='name-btn';
+        btn.innerHTML=(s.number?'<span class="num">'+esc(s.number)+'番</span>':'')+esc(s.name)
+          +(s.hasPassword?'':'<span class="lock">★初回</span>');
+        btn.addEventListener('click',function(){ pickName(s); });
+        grid.appendChild(btn);
+      });
+    }).catch(err);
+  }
+  function backToClasses(){ renderClassPicker(); }
   // サーバー(デプロイ済みコード)が最新かを確認。古ければ赤バナーで警告する。
   function checkBuild(serverBuild){
     if(serverBuild===APP_BUILD) return;
@@ -390,8 +422,10 @@ var App = (function(){
     var pw=$('pw').value;
     if(!pw){toast('パスワードを入力してください');return;}
     if(isNew){ if(pw!==$('pw2').value){toast('パスワードが一致しません');return;} }
-    run('studentLogin',name,pw).then(function(r){
-      user={name:name,password:pw}; teacherPass=null;
+    if(!loginClass){toast('クラスを選びなおしてください');return;}
+    var cls=loginClass;
+    run('studentLogin',cls.classId,name,pw).then(function(r){
+      user={classId:cls.classId,className:cls.name,name:name,password:pw}; teacherPass=null;
       closeModal(); exitLoginMode(); updateHeader();
       if(r.firstTime) toast('パスワードを設定しました！');
       boardList();
@@ -415,13 +449,13 @@ var App = (function(){
   function logout(){ user=null; teacherPass=null; login(); }
   function updateHeader(){
     var w=$('whoami'), b=$('logoutBtn');
-    if(user){ w.textContent='👤 '+user.name; b.classList.remove('hidden'); }
+    if(user){ w.textContent='👤 '+user.name+(user.className?'（'+user.className+'）':''); b.classList.remove('hidden'); }
     else if(teacherPass){ w.textContent='🧑‍🏫 '+teacherName; b.classList.remove('hidden'); }
     else { w.textContent=''; b.classList.add('hidden'); }
   }
 
   // 未読バッジ用：ボードごとに「最後に開いたときの投稿数」を端末に記録
-  function seenKey(id){ return 'mb_seen_'+(user?user.name:'_')+'_'+id; }
+  function seenKey(id){ return 'mb_seen_'+(user?user.classId+'_'+user.name:'_')+'_'+id; }
   function getSeen(id){ try{ var v=localStorage.getItem(seenKey(id)); return v==null?null:parseInt(v,10); }catch(e){ return null; } }
   function setSeen(id,n){ try{ localStorage.setItem(seenKey(id),String(n)); }catch(e){} }
 
@@ -429,10 +463,10 @@ var App = (function(){
   function boardList(){
     stopPolling();
     current.board=null; setCrumb('ボード一覧'); spinner();
-    run('getBoards').then(function(boards){
+    run('getBoards', false, user?user.classId:null).then(function(boards){
       boards=boards||[];
       current.boards=boards;
-      var html='<div class="section-title"><h2>ボード</h2></div>';
+      var html='<div class="section-title"><h2>ボード'+(user&&user.className?'（'+esc(user.className)+'）':'')+'</h2></div>';
       if(!boards.length){ html+='<div class="empty">まだボードがありません。<br>先生がボードを作るとここに出ます。</div>'; }
       else{
         html+='<div class="grid">';
@@ -723,7 +757,7 @@ var App = (function(){
     if(have){ delete r.myReactions[type]; r.reactions[type]=Math.max(0,(r.reactions[type]||0)-1); r.likeCount=Math.max(0,(r.likeCount||0)-1); }
     else { r.myReactions[type]=true; r.reactions[type]=(r.reactions[type]||0)+1; r.likeCount=(r.likeCount||0)+1; }
     updateReactDom(r,d); lastSig=computeSig();
-    run('toggleReaction',r.reflectionId,user.name,user.password,type).then(function(res){
+    run('toggleReaction',r.reflectionId,user.name,user.password,type,user.classId).then(function(res){
       r.reactions=res.reactions; r.myReactions=res.myReactions; r.likeCount=res.count;
       updateReactDom(r,d); lastSig=computeSig();
     }).catch(function(e){
@@ -746,7 +780,7 @@ var App = (function(){
     if(!user && !teacherPass)return;
     var np=!r.pinned; r.pinned=np; r.updatedAt=Date.now();
     renderBoard();
-    run('togglePin',r.reflectionId,user?user.name:null,user?user.password:null,teacherPass)
+    run('togglePin',r.reflectionId,user?user.name:null,user?user.password:null,teacherPass,user?user.classId:null)
       .then(function(res){ r.pinned=res.pinned; lastSig=computeSig(); })
       .catch(function(e){ r.pinned=!np; renderBoard(); err(e); });
   }
@@ -762,7 +796,7 @@ var App = (function(){
       var input=box.querySelector('input'), btn=box.querySelector('button');
       var send=function(){
         var t=input.value.trim(); if(!t)return; btn.disabled=true;
-        run('addComment',r.reflectionId,user.name,user.password,t).then(function(list){
+        run('addComment',r.reflectionId,user.name,user.password,t,user.classId).then(function(list){
           r.comments=list; renderComments(r,d); lastSig=computeSig();
         }).catch(function(e){err(e);btn.disabled=false;});
       };
@@ -775,7 +809,7 @@ var App = (function(){
     var node=cardNode(r.reflectionId); if(node)node.remove();
     current.cards=current.cards.filter(function(c){return c.reflectionId!==r.reflectionId;});
     lastSig=computeSig();
-    run('deleteReflection',r.reflectionId,user?user.name:null,user?user.password:null,teacherPass)
+    run('deleteReflection',r.reflectionId,user?user.name:null,user?user.password:null,teacherPass,user?user.classId:null)
       .catch(function(e){ err(e); refreshBoard(); });
   }
 
@@ -1182,7 +1216,7 @@ var App = (function(){
     var btn=$('mSubmit'); btn.disabled=true; btn.textContent='送信中…';
     var fail=function(e){err(e);btn.disabled=false;btn.textContent='送信';};
     if(mode==='edit'){
-      run('editReflection',editTarget.reflectionId,user?user.name:null,user?user.password:null,teacherPass,title,text,pickedColor,pendingMedia,removeExisting,pendingLink,removeLink)
+      run('editReflection',editTarget.reflectionId,user?user.name:null,user?user.password:null,teacherPass,title,text,pickedColor,pendingMedia,removeExisting,pendingLink,removeLink,user?user.classId:null)
         .then(function(res){
           var u=res.update, card=findCard(u.reflectionId);
           if(card){ card.title=u.title; card.text=u.text; card.color=u.color; card.photoUrl=u.photoUrl; card.mediaType=u.mediaType; card.link=u.link; card.updatedAt=u.updatedAt; replaceCardDom(card); }
@@ -1191,7 +1225,7 @@ var App = (function(){
         }).catch(fail);
     }else{
       var sName=user?user.name:null, sPw=user?user.password:null, tPw=(!user&&teacherPass)?teacherPass:null;
-      run('postReflection',current.board.boardId,postSectionId,sName,sPw,title,text,pickedColor,pendingMedia,pendingLink,tPw)
+      run('postReflection',current.board.boardId,postSectionId,sName,sPw,title,text,pickedColor,pendingMedia,pendingLink,tPw,user?user.classId:null)
         .then(function(res){
           var card=res.card; current.cards.push(card); insertCardDom(card);
           closeModal(); toast('投稿しました！'); lastSig=computeSig();
@@ -1202,6 +1236,7 @@ var App = (function(){
   return {
     init:login, home:home, login:login, logout:logout,
     pickName:pickName, doLogin:doLogin, teacherLogin:teacherLogin, doTeacherLogin:doTeacherLogin,
+    pickClass:pickClass, backToClasses:backToClasses,
     boardList:boardList, openBoard:openBoard, refreshBoard:refreshBoard, leaveBoard:leaveBoard,
     openPost:openPost, openEdit:openEdit, submitMedia:submitMedia, clearMedia:clearMedia,
     previewLink:previewLink, clearLink:clearLink, onLinkTitle:onLinkTitle,
@@ -1226,19 +1261,80 @@ var Teacher=(function(){
   var U=App._;
   var tab='roster';
   var SUBJECTS=['国語','算数・数学','理科','社会','英語','生活','音楽','図工・美術','体育','家庭科','道徳','総合','学活','その他'];
+  var curClass=null, classesCache=[];
 
-  function open(){ U.setCrumb('先生用'); render(); }
+  function open(){ U.setCrumb('先生用'); ensureClasses().then(function(){
+    if(!classesCache.length) tab='classes';
+    render();
+  }).catch(function(){ render(); }); }
   function go(t){ tab=t; render(); }
   function tabsBar(){
     function b(id,l){return '<button class="tab'+(tab===id?' active':'')+'" onclick="Teacher.go(\''+id+'\')">'+l+'</button>';}
-    return '<div class="teacher-tabs">'+b('roster','名簿管理')+b('boards','ボード作成')+b('export','確認・出力')+b('settings','設定')
+    return '<div class="teacher-tabs">'+b('classes','クラス')+b('roster','名簿管理')+b('boards','ボード作成')+b('export','確認・出力')+b('settings','設定')
       +'<button class="tab" onclick="App.logout()">ログアウト</button></div>';
   }
   function render(){
-    if(tab==='roster')roster();
+    if(tab==='classes')classesTab();
+    else if(tab==='roster')roster();
     else if(tab==='boards')boards();
     else if(tab==='settings')settingsTab();
     else exportTab();
+  }
+
+  // -------- クラス管理 --------
+  function ensureClasses(){
+    return U.run('getClasses').then(function(cs){
+      classesCache=cs||[];
+      if(classesCache.length){
+        if(!curClass || !classesCache.some(function(c){return c.classId===curClass;})) curClass=classesCache[0].classId;
+      }else{ curClass=null; }
+      return classesCache;
+    });
+  }
+  function className_(id){ for(var i=0;i<classesCache.length;i++){ if(classesCache[i].classId===id) return classesCache[i].name; } return ''; }
+  // クラス選択セレクト（roster/boards/export 用）
+  function classBar(){
+    if(!classesCache.length) return '';
+    return '<div class="filter-bar"><span style="font-weight:600">クラス：</span>'
+      +'<select class="sort-select" onchange="Teacher.setClass(this.value)">'
+      +classesCache.map(function(c){return '<option value="'+U.esc(c.classId)+'"'+(c.classId===curClass?' selected':'')+'>'+U.esc(c.name)+'</option>';}).join('')
+      +'</select></div>';
+  }
+  function setClass(id){ curClass=id; render(); }
+  function noClassMsg(){ return tabsBar()+'<div class="empty">まだクラスがありません。<br>「クラス」タブでクラスを作成してください。</div>'; }
+
+  function classesTab(){
+    U.spinner();
+    ensureClasses().then(function(){
+      var html=tabsBar()+'<div class="section-title"><h2>クラス管理</h2></div>';
+      html+='<div class="row-form"><label class="field"><span>クラス名</span>'
+        +'<input id="clsName" placeholder="例：5年1組"></label>'
+        +'<button class="primary-btn" onclick="Teacher.addClass()">追加</button></div>';
+      if(classesCache.length){
+        html+='<table><tr><th>クラス名</th><th>操作</th></tr>';
+        classesCache.forEach(function(c){
+          var id=JSON.stringify(c.classId).replace(/"/g,'&quot;');
+          html+='<tr><td>'+U.esc(c.name)+'</td>'
+            +'<td><button class="ghost-btn" onclick="Teacher.renameClass('+id+')">名前変更</button> '
+            +'<button class="ghost-btn danger" onclick="Teacher.delClass('+id+')">削除</button></td></tr>';
+        });
+        html+='</table><p style="color:var(--muted);font-size:13px">※生徒やボードが残っているクラスは削除できません。</p>';
+      }else{ html+='<div class="empty">まだクラスがありません。最初にクラスを追加してください。</div>'; }
+      U.view().innerHTML=html;
+    }).catch(U.err);
+  }
+  function addClass(){
+    var name=document.getElementById('clsName').value.trim();
+    if(!name){U.toast('クラス名を入力してください');return;}
+    U.run('createClass',name,U.getTeacherPass()).then(function(cs){ classesCache=cs||[]; if(!curClass&&cs.length)curClass=cs[cs.length-1].classId; U.toast('追加しました'); classesTab(); }).catch(U.err);
+  }
+  function renameClass(id){
+    var cur=className_(id); var name=prompt('クラス名を変更',cur); if(name==null)return; name=name.trim(); if(!name)return;
+    U.run('renameClass',id,name,U.getTeacherPass()).then(function(cs){ classesCache=cs||[]; classesTab(); }).catch(U.err);
+  }
+  function delClass(id){
+    if(!confirm('このクラスを削除しますか？（生徒・ボードが残っていると削除できません）'))return;
+    U.run('deleteClass',id,U.getTeacherPass()).then(function(cs){ classesCache=cs||[]; if(curClass===id)curClass=cs.length?cs[0].classId:null; U.toast('削除しました'); classesTab(); }).catch(U.err);
   }
 
   // -------- 設定（先生の名前・パスワード） --------
@@ -1292,8 +1388,10 @@ var Teacher=(function(){
   // -------- 名簿 --------
   function roster(){
     U.spinner();
-    U.run('getStudents').then(function(students){
-      var html=tabsBar()+'<div class="section-title"><h2>名簿</h2></div>';
+    ensureClasses().then(function(){
+      if(!classesCache.length){ U.view().innerHTML=noClassMsg(); return; }
+      U.run('getStudents',curClass).then(function(students){
+      var html=tabsBar()+classBar()+'<div class="section-title"><h2>名簿（'+U.esc(className_(curClass))+'）</h2></div>';
       html+='<div class="row-form">'
         +'<label class="field" style="max-width:110px"><span>出席番号</span><input id="sNum" type="number"></label>'
         +'<label class="field"><span>名前</span><input id="sName" placeholder="山田 太郎"></label>'
@@ -1314,27 +1412,30 @@ var Teacher=(function(){
         html+='</table>';
       }
       U.view().innerHTML=html;
+      }).catch(U.err);
     }).catch(U.err);
   }
   function addStudent(){
     var n=document.getElementById('sNum').value, nm=document.getElementById('sName').value.trim();
     if(!nm){U.toast('名前を入力してください');return;}
-    U.run('addStudent',n,nm).then(roster).catch(U.err);
+    U.run('addStudent',n,nm,curClass).then(roster).catch(U.err);
   }
   function bulkAdd(){
     var t=document.getElementById('bulk').value; if(!t.trim())return;
-    U.run('importStudents',t).then(function(){U.toast('登録しました');roster();}).catch(U.err);
+    U.run('importStudents',t,curClass).then(function(){U.toast('登録しました');roster();}).catch(U.err);
   }
-  function removeStudent(name){ if(!confirm(name+' を削除しますか？'))return; U.run('removeStudent',name).then(roster).catch(U.err); }
-  function resetPw(name){ if(!confirm(name+' のパスワードをリセットしますか？（次回ログイン時に再設定）'))return; U.run('resetStudentPassword',name).then(function(){U.toast('リセットしました');roster();}).catch(U.err); }
+  function removeStudent(name){ if(!confirm(name+' を削除しますか？'))return; U.run('removeStudent',name,curClass).then(roster).catch(U.err); }
+  function resetPw(name){ if(!confirm(name+' のパスワードをリセットしますか？（次回ログイン時に再設定）'))return; U.run('resetStudentPassword',name,curClass).then(function(){U.toast('リセットしました');roster();}).catch(U.err); }
 
   // -------- ボード作成 --------
   function boards(){
     U.spinner();
-    U.run('getBoards', true).then(function(list){
+    ensureClasses().then(function(){
+      if(!classesCache.length){ U.view().innerHTML=noClassMsg(); return; }
+      U.run('getBoards', true, curClass).then(function(list){
       list=list||[];
       var today=new Date().toISOString().slice(0,10);
-      var html=tabsBar()+'<div class="section-title"><h2>ボードを作成</h2></div>';
+      var html=tabsBar()+classBar()+'<div class="section-title"><h2>ボードを作成（'+U.esc(className_(curClass))+'）</h2></div>';
       html+='<div class="row-form">'
         +'<label class="field"><span>教科</span><select id="bSub">'+SUBJECTS.map(function(s){return '<option>'+s+'</option>';}).join('')+'</select></label>'
         +'<label class="field"><span>単元名</span><input id="bUnit" placeholder="例：ふりこの動き"></label>'
@@ -1362,13 +1463,14 @@ var Teacher=(function(){
         html+='</table>';
       }else{ html+='<div class="empty">まだボードがありません。</div>'; }
       U.view().innerHTML=html;
+      }).catch(U.err);
     }).catch(U.err);
   }
   function createBoard(){
     var sub=document.getElementById('bSub').value, unit=document.getElementById('bUnit').value.trim(),
         date=document.getElementById('bDate').value, title=document.getElementById('bTitle').value.trim();
     if(!unit){U.toast('単元名を入力してください');return;}
-    U.run('createBoard',sub,unit,date,title).then(function(){U.toast('作成しました');boards();}).catch(U.err);
+    U.run('createBoard',sub,unit,date,title,curClass).then(function(){U.toast('作成しました');boards();}).catch(U.err);
   }
   function delBoard(id){ if(!confirm('このボードと投稿・写真をすべて削除します。よろしいですか？'))return; U.run('deleteBoard',id).then(function(){U.toast('削除しました');boards();}).catch(U.err); }
   function setArchived(id, archived){
@@ -1379,9 +1481,11 @@ var Teacher=(function(){
   // -------- 確認・出力 --------
   function exportTab(){
     U.spinner();
-    Promise.all([U.run('getBoards', true),U.run('getStudents')]).then(function(res){
+    ensureClasses().then(function(){
+      if(!classesCache.length){ U.view().innerHTML=noClassMsg(); return; }
+      Promise.all([U.run('getBoards', true, curClass),U.run('getStudents', curClass)]).then(function(res){
       var bs=res[0], sts=res[1];
-      var html=tabsBar()+'<div class="section-title"><h2>確認・出力</h2></div>';
+      var html=tabsBar()+classBar()+'<div class="section-title"><h2>確認・出力（'+U.esc(className_(curClass))+'）</h2></div>';
       html+='<div class="row-form"><label class="field"><span>ボード全体を出力</span><select id="exB">'
         +(bs.length?bs.map(function(b){return '<option value="'+U.esc(b.boardId)+'">'+U.esc(b.subject+' / '+b.unit+' / '+b.date)+'</option>';}).join(''):'<option value="">（ボードなし）</option>')
         +'</select></label>'
@@ -1393,6 +1497,7 @@ var Teacher=(function(){
         +'<button class="primary-btn" onclick="Teacher.printStudent()">🖨 印刷／PDF</button></div>';
       html+='<p style="color:var(--muted);font-size:13px">※「印刷／PDF」では、印刷ダイアログで「PDFに保存」を選べばファイル出力できます。すべての記録はスプレッドシートにも自動保存されています。</p>';
       U.view().innerHTML=html;
+      }).catch(U.err);
     }).catch(U.err);
   }
   function viewBoard(){ var id=document.getElementById('exB').value; if(id) App.openBoard(id); }
@@ -1420,7 +1525,7 @@ var Teacher=(function(){
   }
   function printStudent(){
     var name=document.getElementById('exS').value; if(!name){U.toast('児童を選んでください');return;}
-    U.run('exportStudent',name).then(function(data){
+    U.run('exportStudent',name,curClass).then(function(data){
       var html='<div class="print-head"><h1>'+U.esc(data.studentName)+' さんの振り返り</h1>'
         +'<div>件数 '+data.reflections.length+'件</div></div>';
       data.reflections.forEach(function(r){
@@ -1457,7 +1562,8 @@ var Teacher=(function(){
 
   return {open:open,go:go,addStudent:addStudent,bulkAdd:bulkAdd,removeStudent:removeStudent,resetPw:resetPw,
     createBoard:createBoard,delBoard:delBoard,setArchived:setArchived,viewBoard:viewBoard,printBoard:printBoard,printStudent:printStudent,
-    saveName:saveName,savePw:savePw};
+    saveName:saveName,savePw:savePw,
+    setClass:setClass,addClass:addClass,renameClass:renameClass,delClass:delClass};
 })();
 
 window.onload=App.init;
