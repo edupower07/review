@@ -15,7 +15,7 @@ var PROP_SCHEMA_VERSION = 'SCHEMA_VERSION';
 var SCHEMA_VERSION = '9';
 // クライアント(Index.html)の APP_BUILD と必ず一致させること。
 // デプロイ更新忘れ（古いコードが動いている状態）を検知するために使う。
-var APP_BUILD = '16';
+var APP_BUILD = '17';
 
 var SHEET_STUDENTS = 'Students';
 var SHEET_BOARDS = 'Boards';
@@ -583,8 +583,7 @@ function createBoard(subject, unit, date, title, classId) {
   getSheet_(SHEET_BOARDS).appendRow([id, subject, unit, "'" + date, title, new Date(), false, classId]);
   var created = getBoard(id);
   if (!created) throw new Error('ボードの作成に失敗しました。もう一度お試しください。');
-  // 既定セクションを1つ用意しておく（最初から投稿できるように）
-  getSheet_(SHEET_SECTIONS).appendRow([genId_('s'), id, 'みんなの投稿', 1, new Date(), '']);
+  // セクションは作らない（0セクションから開始。先生が「＋セクション」で追加する）
   return created;
 }
 
