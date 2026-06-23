@@ -257,7 +257,7 @@
 // ============================================================
 var App = (function(){
   // サーバー(Code.gs)の APP_BUILD と必ず一致させること。ズレていれば「デプロイ未更新」を警告する。
-  var APP_BUILD = '14';
+  var APP_BUILD = '15';
   var COLORS = ['#fff7c0','#ffd1dc','#c8f0d0','#cfe3ff','#e8d6ff','#ffe2bf','#ffffff'];
   // セクションの色分け用パレット（先生が選ぶ）
   var SECTION_COLORS = ['#e8554e','#e08a3c','#d9a400','#2faf6b','#2796a8','#3f7fd6','#8c5bd0','#d24b8c','#7a8b3c','#6a7a8c'];
@@ -373,24 +373,22 @@ var App = (function(){
     loginClass=c;
     var title=$('loginTitle'); if(title) title.textContent=esc(c.name)+' のメンバー';
     var body=$('loginBody'); if(!body)return;
-    body.innerHTML='<div class="spinner">読み込み中…</div>';
-    run('getClassStudents',c.classId).then(function(students){
-      body.innerHTML='<div style="margin-bottom:12px"><button class="ghost-btn" onclick="App.backToClasses()">← クラスを選びなおす</button></div>'
-        +'<div class="name-grid" id="nameGrid"></div>';
-      var grid=$('nameGrid');
-      if(!students.length){
-        grid.innerHTML='<div class="empty" style="grid-column:1/-1">このクラスにはまだ名簿がありません。</div>';
-        return;
-      }
-      students.forEach(function(s){
-        var btn=document.createElement('button');
-        btn.className='name-btn';
-        btn.innerHTML=(s.number?'<span class="num">'+esc(s.number)+'番</span>':'')+esc(s.name)
-          +(s.hasPassword?'':'<span class="lock">★初回</span>');
-        btn.addEventListener('click',function(){ pickName(s); });
-        grid.appendChild(btn);
-      });
-    }).catch(err);
+    var students=(loginInfo&&loginInfo.studentsByClass&&loginInfo.studentsByClass[c.classId])||[];
+    body.innerHTML='<div style="margin-bottom:12px"><button class="ghost-btn" onclick="App.backToClasses()">← クラスを選びなおす</button></div>'
+      +'<div class="name-grid" id="nameGrid"></div>';
+    var grid=$('nameGrid');
+    if(!students.length){
+      grid.innerHTML='<div class="empty" style="grid-column:1/-1">このクラスにはまだ名簿がありません。</div>';
+      return;
+    }
+    students.forEach(function(s){
+      var btn=document.createElement('button');
+      btn.className='name-btn';
+      btn.innerHTML=(s.number?'<span class="num">'+esc(s.number)+'番</span>':'')+esc(s.name)
+        +(s.hasPassword?'':'<span class="lock">★初回</span>');
+      btn.addEventListener('click',function(){ pickName(s); });
+      grid.appendChild(btn);
+    });
   }
   function backToClasses(){ renderClassPicker(); }
   // サーバー(デプロイ済みコード)が最新かを確認。古ければ赤バナーで警告する。

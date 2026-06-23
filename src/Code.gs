@@ -15,7 +15,7 @@ var PROP_SCHEMA_VERSION = 'SCHEMA_VERSION';
 var SCHEMA_VERSION = '9';
 // クライアント(Index.html)の APP_BUILD と必ず一致させること。
 // デプロイ更新忘れ（古いコードが動いている状態）を検知するために使う。
-var APP_BUILD = '14';
+var APP_BUILD = '15';
 
 var SHEET_STUDENTS = 'Students';
 var SHEET_BOARDS = 'Boards';
@@ -269,10 +269,18 @@ function deleteRowsWhere_(name, key, value) {
 
 // ============================ ログイン / 名簿 ============================
 
-/** 起動時情報：クラス一覧と先生パスワード設定状況。 */
+/** 起動時情報：クラス一覧＋クラス別名簿と先生パスワード設定状況。 */
 function getLoginInfo() {
+  var byClass = {};
+  readSheet_(SHEET_STUDENTS).forEach(function (s) {
+    var k = String(s.classId || '');
+    (byClass[k] = byClass[k] || []).push({ number: s.number, name: s.name, hasPassword: !!s.passwordHash });
+  });
+  Object.keys(byClass).forEach(function (k) {
+    byClass[k].sort(function (a, b) { return (a.number || 0) - (b.number || 0); });
+  });
   var teacherSet = !!PropertiesService.getScriptProperties().getProperty(PROP_TEACHER_HASH);
-  return { classes: getClasses(), teacherSet: teacherSet, build: APP_BUILD };
+  return { classes: getClasses(), studentsByClass: byClass, teacherSet: teacherSet, build: APP_BUILD };
 }
 
 /** クラス内の名簿（クラス選択後に取得）。 */
