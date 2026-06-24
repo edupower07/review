@@ -109,6 +109,13 @@
     #board{display:flex;gap:16px;align-items:stretch;overflow-x:auto;
       height:calc(100vh - 184px);min-height:320px;padding-bottom:6px}
     body:not(.login-mode) main:has(#board){padding-bottom:16px}
+    /* ボード表示中は上部を詰めて、掲示板領域を画面いっぱいに使う */
+    body.board-view main{max-width:none;padding:8px 12px;height:calc(100vh - 54px);
+      display:flex;flex-direction:column;overflow:hidden}
+    body.board-view .board-bar{margin-bottom:8px;padding:8px 14px}
+    body.board-view .board-bar .title{font-size:16px}
+    body.board-view .filter-bar{margin-bottom:8px}
+    body.board-view #board{height:auto;flex:1 1 auto;min-height:0;padding-bottom:0}
     .section-col{flex:0 0 286px;background:rgba(255,255,255,.55);border:1px solid var(--border);
       border-radius:14px;display:flex;flex-direction:column;overflow:hidden}
     /* 固定ヘッダー（＋ボタンが上、その下にタイトル） */
@@ -257,7 +264,7 @@
 // ============================================================
 var App = (function(){
   // サーバー(Code.gs)の APP_BUILD と必ず一致させること。ズレていれば「デプロイ未更新」を警告する。
-  var APP_BUILD = '18';
+  var APP_BUILD = '19';
   var COLORS = ['#fff7c0','#ffd1dc','#c8f0d0','#cfe3ff','#e8d6ff','#ffe2bf','#ffffff'];
   // セクションの色分け用パレット（先生が選ぶ）
   var SECTION_COLORS = ['#e8554e','#e08a3c','#d9a400','#2faf6b','#2796a8','#3f7fd6','#8c5bd0','#d24b8c','#7a8b3c','#6a7a8c'];
@@ -290,7 +297,7 @@ var App = (function(){
   var $ = function(id){ return document.getElementById(id); };
   var view = function(){ return $('view'); };
   function esc(s){return String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');}
-  function spinner(){ var b=$('errBanner'); if(b)b.classList.add('hidden'); view().innerHTML='<div class="spinner">読み込み中…</div>'; }
+  function spinner(){ var b=$('errBanner'); if(b)b.classList.add('hidden'); document.body.classList.remove('board-view'); view().innerHTML='<div class="spinner">読み込み中…</div>'; }
   function setCrumb(t){ $('crumb').textContent = t ? '/ '+t : ''; }
   function toast(m){var t=$('toast');t.textContent=m;t.classList.remove('hidden');clearTimeout(t._t);t._t=setTimeout(function(){t.classList.add('hidden');},2600);}
   function fmt(d){if(d==null||d==='')return '';var x=new Date(d);if(isNaN(x))return '';return (x.getMonth()+1)+'/'+x.getDate()+' '+('0'+x.getHours()).slice(-2)+':'+('0'+x.getMinutes()).slice(-2);}
@@ -331,6 +338,7 @@ var App = (function(){
   function login(){
     stopPolling();
     user=null; teacherPass=null; loginClass=null; setCrumb(''); updateHeader();
+    document.body.classList.remove('board-view');
     document.body.classList.add('login-mode');
     // ヒーローは即時表示（読み込み待ちの体感を減らす）。中身だけ後から差し込む。
     view().innerHTML=
@@ -520,6 +528,7 @@ var App = (function(){
   function renderBoard(){
     var b=current.board, col=subjColor(b.subject);
     var isTeacher=!!teacherPass;
+    document.body.classList.add('board-view');
     var bar='<div class="board-bar" style="border-left-color:'+col+'">'
       +'<div><div class="title">'+esc(b.title)+'</div>'
       +'<div class="sub">'+esc(b.subject)+' ・ '+esc(b.unit)+' ・ '+esc(b.date)+'</div></div>'
