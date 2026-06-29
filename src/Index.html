@@ -264,7 +264,7 @@
 // ============================================================
 var App = (function(){
   // サーバー(Code.gs)の APP_BUILD と必ず一致させること。ズレていれば「デプロイ未更新」を警告する。
-  var APP_BUILD = '21';
+  var APP_BUILD = '22';
   var COLORS = ['#fff7c0','#ffd1dc','#c8f0d0','#cfe3ff','#e8d6ff','#ffe2bf','#ffffff'];
   // セクションの色分け用パレット（先生が選ぶ）
   var SECTION_COLORS = ['#e8554e','#e08a3c','#d9a400','#2faf6b','#2796a8','#3f7fd6','#8c5bd0','#d24b8c','#7a8b3c','#6a7a8c'];
@@ -301,7 +301,7 @@ var App = (function(){
   function setCrumb(t){ $('crumb').textContent = t ? '/ '+t : ''; }
   function toast(m){var t=$('toast');t.textContent=m;t.classList.remove('hidden');clearTimeout(t._t);t._t=setTimeout(function(){t.classList.add('hidden');},2600);}
   function fmt(d){if(d==null||d==='')return '';var x=new Date(d);if(isNaN(x))return '';return (x.getMonth()+1)+'/'+x.getDate()+' '+('0'+x.getHours()).slice(-2)+':'+('0'+x.getMinutes()).slice(-2);}
-  function run(fn){var a=[].slice.call(arguments,1);return new Promise(function(res,rej){var r=google.script.run.withSuccessHandler(res).withFailureHandler(rej);if(typeof r[fn]!=='function'){rej(new Error('サーバー機能「'+fn+'」が見つかりません。最新のコードを保存し、ウェブアプリのデプロイ（バージョン）を更新してください。'));return;}r[fn].apply(r,a);});}
+  function run(fn){var a=[].slice.call(arguments,1);return new Promise(function(res,rej){var r=google.script.run.withSuccessHandler(res).withFailureHandler(rej);if(typeof r[fn]!=='function'){rej(new Error('サーバー機能「'+fn+'」が見つかりません。まずこのページを再読み込み（Ctrl+Shift+R）してください。直らなければ Code.gs を全文貼り直し→デプロイのバージョンを更新してください。'));return;}r[fn].apply(r,a);});}
   function errMsg(e){return (e&&e.message)?e.message:(e==null?'不明なエラー':String(e));}
   function err(e){
     console.error(e);
