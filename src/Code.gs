@@ -15,7 +15,7 @@ var PROP_SCHEMA_VERSION = 'SCHEMA_VERSION';
 var SCHEMA_VERSION = '9';
 // クライアント(Index.html)の APP_BUILD と必ず一致させること。
 // デプロイ更新忘れ（古いコードが動いている状態）を検知するために使う。
-var APP_BUILD = '22';
+var APP_BUILD = '23';
 
 var SHEET_STUDENTS = 'Students';
 var SHEET_BOARDS = 'Boards';
@@ -600,7 +600,7 @@ function createBoard(subject, unit, date, title, classId) {
 }
 
 /**
- * ボードをコピー（先生のみ）。セクション構成（名前・色・並び）を複製する。
+ * ボードをコピー（先生のみ）。セクション構成（名前・色・並び）と「先生名義の投稿」を複製する。
  * 児童の投稿・コメント・いいねはコピーしない。targetClassId で別クラスにも複製可。
  */
 function copyBoard(boardId, targetClassId, teacherPassword) {
@@ -618,10 +618,42 @@ function copyBoard(boardId, targetClassId, teacherPassword) {
   // 列順は SHEET_DEFS[SHEET_BOARDS] と一致させること
   getSheet_(SHEET_BOARDS).appendRow([newId, asText_(src.subject), "'" + asText_(src.unit), "'" + today, "'" + title, new Date(), false, targetClassId]);
 
-  // セクションを複製
+  // セクションを複製し、旧→新の対応表を作る
   var secSheet = getSheet_(SHEET_SECTIONS);
+  var secMap = {};
   getSections(boardId).forEach(function (s) {
-    secSheet.appendRow([genId_('s'), newId, "'" + s.name, s.sortOrder, new Date(), s.color || '']);
+    var nid = genId_('s');
+    secMap[s.sectionId] = nid;
+    secSheet.appendRow([nid, newId, "'" + s.name, s.sortOrder, new Date(), s.color || '']);
+  });
+
+  // 先生名義の投稿だけを複製（児童の投稿は複製しない）
+  var teacherName = getTeacherName_();
+  var refSheet = getSheet_(SHEET_REFLECTIONS);
+  var defR = SHEET_DEFS[SHEET_REFLECTIONS];
+  readSheet_(SHEET_REFLECTIONS).forEach(function (r) {
+    if (r.boardId !== boardId) return;
+    if (asText_(r.studentName) !== teacherName) return;
+    var newSec = r.sectionId ? (secMap[r.sectionId] || '') : '';
+    var pinned = (r.pinned === true || r.pinned === 'true' || r.pinned === 1);
+    // 写真/動画は同じ表示URLを使い回す（photoFileId は空にして、元ボード削除時の巻き込み消去を防ぐ）
+    var row = [];
+    row[defR.indexOf('reflectionId')] = genId_('r');
+    row[defR.indexOf('boardId')] = newId;
+    row[defR.indexOf('studentName')] = teacherName;
+    row[defR.indexOf('text')] = "'" + asText_(r.text);
+    row[defR.indexOf('photoUrl')] = r.photoUrl || '';
+    row[defR.indexOf('photoFileId')] = '';
+    row[defR.indexOf('color')] = r.color || '#fff7c0';
+    row[defR.indexOf('sortOrder')] = Number(r.sortOrder) || 1;
+    row[defR.indexOf('createdAt')] = new Date();
+    row[defR.indexOf('sectionId')] = newSec;
+    row[defR.indexOf('mediaType')] = r.mediaType || '';
+    row[defR.indexOf('updatedAt')] = new Date();
+    row[defR.indexOf('pinned')] = pinned;
+    row[defR.indexOf('title')] = "'" + asText_(r.title);
+    row[defR.indexOf('link')] = r.link || '';
+    refSheet.appendRow(row);
   });
   return getBoard(newId);
 }

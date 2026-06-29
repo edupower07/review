@@ -264,7 +264,7 @@
 // ============================================================
 var App = (function(){
   // サーバー(Code.gs)の APP_BUILD と必ず一致させること。ズレていれば「デプロイ未更新」を警告する。
-  var APP_BUILD = '22';
+  var APP_BUILD = '23';
   var COLORS = ['#fff7c0','#ffd1dc','#c8f0d0','#cfe3ff','#e8d6ff','#ffe2bf','#ffffff'];
   // セクションの色分け用パレット（先生が選ぶ）
   var SECTION_COLORS = ['#e8554e','#e08a3c','#d9a400','#2faf6b','#2796a8','#3f7fd6','#8c5bd0','#d24b8c','#7a8b3c','#6a7a8c'];
@@ -1538,7 +1538,7 @@ var Teacher=(function(){
   function copyBoard(id){
     var opts=classesCache.map(function(c){return '<option value="'+U.esc(c.classId)+'"'+(c.classId===curClass?' selected':'')+'>'+U.esc(c.name)+'</option>';}).join('');
     U.modal('<h3>ボードをコピー</h3>'
-      +'<p style="color:var(--muted);font-size:13px">セクション構成（名前・色）をコピーします。児童の投稿はコピーされません。</p>'
+      +'<p style="color:var(--muted);font-size:13px">セクション構成（名前・色）と<b>先生が投稿したもの</b>をコピーします。児童の投稿はコピーされません。</p>'
       +'<label class="field"><span>コピー先のクラス</span><select id="cpCls">'+opts+'</select></label>'
       +'<div class="modal-actions"><button class="ghost-btn" onclick="App.closeModal()">やめる</button>'
       +'<button class="primary-btn" onclick="Teacher.doCopyBoard('+JSON.stringify(id).replace(/"/g,'&quot;')+')">コピーする</button></div>');
