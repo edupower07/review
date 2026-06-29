@@ -15,7 +15,7 @@ var PROP_SCHEMA_VERSION = 'SCHEMA_VERSION';
 var SCHEMA_VERSION = '9';
 // クライアント(Index.html)の APP_BUILD と必ず一致させること。
 // デプロイ更新忘れ（古いコードが動いている状態）を検知するために使う。
-var APP_BUILD = '20';
+var APP_BUILD = '21';
 
 var SHEET_STUDENTS = 'Students';
 var SHEET_BOARDS = 'Boards';
@@ -597,6 +597,33 @@ function createBoard(subject, unit, date, title, classId) {
   if (!created) throw new Error('ボードの作成に失敗しました。もう一度お試しください。');
   // セクションは作らない（0セクションから開始。先生が「＋セクション」で追加する）
   return created;
+}
+
+/**
+ * ボードをコピー（先生のみ）。セクション構成（名前・色・並び）を複製する。
+ * 児童の投稿・コメント・いいねはコピーしない。targetClassId で別クラスにも複製可。
+ */
+function copyBoard(boardId, targetClassId, teacherPassword) {
+  if (!isTeacher_(teacherPassword)) throw new Error('この操作は先生のみ可能です。');
+  if (!targetClassId) throw new Error('コピー先のクラスを選んでください。');
+  var src = readSheet_(SHEET_BOARDS).filter(function (r) { return r.boardId === boardId; })[0];
+  if (!src) throw new Error('コピー元のボードが見つかりません。');
+
+  var sameClass = String(src.classId || '') === String(targetClassId);
+  var title = asText_(src.title);
+  if (sameClass) title = title + ' のコピー';   // 同クラスは名前で区別
+
+  var newId = genId_('b');
+  var today = Utilities.formatDate(new Date(), 'Asia/Tokyo', 'yyyy-MM-dd');
+  // 列順は SHEET_DEFS[SHEET_BOARDS] と一致させること
+  getSheet_(SHEET_BOARDS).appendRow([newId, asText_(src.subject), "'" + asText_(src.unit), "'" + today, "'" + title, new Date(), false, targetClassId]);
+
+  // セクションを複製
+  var secSheet = getSheet_(SHEET_SECTIONS);
+  getSections(boardId).forEach(function (s) {
+    secSheet.appendRow([genId_('s'), newId, "'" + s.name, s.sortOrder, new Date(), s.color || '']);
+  });
+  return getBoard(newId);
 }
 
 function deleteBoard(boardId) {

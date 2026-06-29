@@ -264,7 +264,7 @@
 // ============================================================
 var App = (function(){
   // サーバー(Code.gs)の APP_BUILD と必ず一致させること。ズレていれば「デプロイ未更新」を警告する。
-  var APP_BUILD = '20';
+  var APP_BUILD = '21';
   var COLORS = ['#fff7c0','#ffd1dc','#c8f0d0','#cfe3ff','#e8d6ff','#ffe2bf','#ffffff'];
   // セクションの色分け用パレット（先生が選ぶ）
   var SECTION_COLORS = ['#e8554e','#e08a3c','#d9a400','#2faf6b','#2796a8','#3f7fd6','#8c5bd0','#d24b8c','#7a8b3c','#6a7a8c'];
@@ -1518,6 +1518,7 @@ var Teacher=(function(){
           html+='<tr'+rowStyle+'><td>'+dot+U.esc(b.subject)+'</td><td>'+U.esc(b.unit)+'</td><td>'+U.esc(b.date)+'</td><td>'+U.esc(b.title)+'</td>'
             +'<td>'+state+'</td>'
             +'<td><button class="ghost-btn" onclick="App.openBoard('+id+')">開く</button> '
+            +'<button class="ghost-btn" onclick="Teacher.copyBoard('+id+')">📋 コピー</button> '
             +toggle+' '
             +'<button class="ghost-btn danger" onclick="Teacher.delBoard('+id+')">削除</button></td></tr>';
         });
@@ -1534,6 +1535,22 @@ var Teacher=(function(){
     U.run('createBoard',sub,unit,date,title,curClass).then(function(){U.toast('作成しました');boards();}).catch(U.err);
   }
   function delBoard(id){ if(!confirm('このボードと投稿・写真をすべて削除します。よろしいですか？'))return; U.run('deleteBoard',id).then(function(){U.toast('削除しました');boards();}).catch(U.err); }
+  function copyBoard(id){
+    var opts=classesCache.map(function(c){return '<option value="'+U.esc(c.classId)+'"'+(c.classId===curClass?' selected':'')+'>'+U.esc(c.name)+'</option>';}).join('');
+    U.modal('<h3>ボードをコピー</h3>'
+      +'<p style="color:var(--muted);font-size:13px">セクション構成（名前・色）をコピーします。児童の投稿はコピーされません。</p>'
+      +'<label class="field"><span>コピー先のクラス</span><select id="cpCls">'+opts+'</select></label>'
+      +'<div class="modal-actions"><button class="ghost-btn" onclick="App.closeModal()">やめる</button>'
+      +'<button class="primary-btn" onclick="Teacher.doCopyBoard('+JSON.stringify(id).replace(/"/g,'&quot;')+')">コピーする</button></div>');
+  }
+  function doCopyBoard(id){
+    var t=document.getElementById('cpCls').value; if(!t){U.toast('クラスを選んでください');return;}
+    U.run('copyBoard',id,t,U.getTeacherPass()).then(function(){
+      U.closeModal();
+      if(t===curClass){ U.toast('コピーしました'); boards(); }
+      else { U.toast('「'+className_(t)+'」にコピーしました'); }
+    }).catch(U.err);
+  }
   function setArchived(id, archived){
     U.run('setBoardArchived',id,archived,U.getTeacherPass())
       .then(function(){U.toast(archived?'児童の一覧から非表示にしました':'再表示しました');boards();}).catch(U.err);
@@ -1623,6 +1640,7 @@ var Teacher=(function(){
 
   return {open:open,go:go,addStudent:addStudent,bulkAdd:bulkAdd,removeStudent:removeStudent,resetPw:resetPw,
     createBoard:createBoard,delBoard:delBoard,setArchived:setArchived,viewBoard:viewBoard,printBoard:printBoard,printStudent:printStudent,
+    copyBoard:copyBoard,doCopyBoard:doCopyBoard,
     saveName:saveName,savePw:savePw,
     setClass:setClass,addClass:addClass,renameClass:renameClass,delClass:delClass};
 })();
