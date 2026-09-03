@@ -124,8 +124,15 @@
       border-radius:10px;padding:7px;font-size:16px;font-weight:700;cursor:pointer;margin-top:8px}
     .add-bar:hover{background:var(--accent2);color:#fff}
     .col-title{display:flex;align-items:center;justify-content:space-between;gap:6px}
-    .col-title .sec-name{font-weight:700;font-size:16px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+    .col-title .sec-name{flex:1 1 auto;min-width:0;font-weight:700;font-size:16px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+    /* セクションの並べ替え用つまみ（先生のみ表示） */
+    .sec-grip{flex:0 0 auto;border:none;background:transparent;color:var(--muted);cursor:grab;
+      font-size:15px;line-height:1;padding:2px 2px;touch-action:none}
+    .sec-grip:active{cursor:grabbing}
+    .section-col.sec-dragging{opacity:.6;box-shadow:0 10px 26px rgba(0,0,0,.18)}
+    body.sec-dragging{user-select:none;-webkit-user-select:none}
     .col-title .count{color:var(--muted);font-weight:400;font-size:13px;margin-left:4px}
+    .sec-tools{flex:0 0 auto;display:flex;white-space:nowrap}
     .sec-tools button{border:none;background:transparent;cursor:pointer;font-size:14px;padding:2px 4px}
     .card-list{flex:1 1 auto;overflow-y:auto;padding:12px;display:flex;flex-direction:column;gap:12px}
 
@@ -264,7 +271,7 @@
 // ============================================================
 var App = (function(){
   // サーバー(Code.gs)の APP_BUILD と必ず一致させること。ズレていれば「デプロイ未更新」を警告する。
-  var APP_BUILD = '23';
+  var APP_BUILD = '24';
   var COLORS = ['#fff7c0','#ffd1dc','#c8f0d0','#cfe3ff','#e8d6ff','#ffe2bf','#ffffff'];
   // セクションの色分け用パレット（先生が選ぶ）
   var SECTION_COLORS = ['#e8554e','#e08a3c','#d9a400','#2faf6b','#2796a8','#3f7fd6','#8c5bd0','#d24b8c','#7a8b3c','#6a7a8c'];
@@ -288,8 +295,10 @@ var App = (function(){
   var user = null;          // {name, password} 生徒
   var teacherPass = null;   // 先生パスワード（先生ログイン時）
   var teacherName = '先生'; // 先生の表示名（投稿時の名義）
-  var current = { board:null, cards:[], sections:[], boards:[], students:[] };
+  var current = { board:null, cards:[], sections:[], boards:[], students:[], roster:[] };
   var dragEl = null;
+  var rosterNo = {};      // 名前 → 出席番号（名簿順の並べ替えに使う）
+  var secDrag = null;     // セクションのドラッグ状態
   var pollTimer = null;   // リアルタイム更新用タイマー
   var lastSig = '';       // 直近のボード状態シグネチャ
   var lastScrollTs = 0;   // 直近にスクロールした時刻（再描画の一時停止に使う）
@@ -498,14 +507,22 @@ var App = (function(){
     current.board=data.board;
     current.sections=data.sections||[];
     current.cards=data.cards||[];
+    if(data.roster) current.roster=data.roster;
+    rosterNo={};
+    (current.roster||[]).forEach(function(s){ if(s&&s.name) rosterNo[s.name]=Number(s.number)||0; });
   }
+  // 名簿にいない投稿者（先生など）は末尾へ回す
+  function rosterNum(name){ var n=rosterNo[name]; return (n>0)?n:99999; }
   var REACTIONS=['❤','👍','😲','🤔','😢'];
-  var sortMode='manual';   // 'manual'(古い順/ドラッグ順) | 'new' | 'likes' | 'comments'
+  var sortMode='manual';   // 'manual'(古い順/ドラッグ順) | 'new' | 'roster' | 'likes' | 'comments'
   var filterText='', onlyMine=false, onlyMedia=false;  // 絞り込み状態
   function clientCardCmp(a,b){
     // ピン留めは常に先頭
     if(!!a.pinned!==!!b.pinned) return a.pinned?-1:1;
     if(sortMode==='new')      return (b.createdAt||0)-(a.createdAt||0);
+    if(sortMode==='roster')   { var dn=rosterNum(a.studentName)-rosterNum(b.studentName); if(dn) return dn;
+                                if(a.studentName!==b.studentName) return a.studentName<b.studentName?-1:1;
+                                return (a.createdAt||0)-(b.createdAt||0); }
     if(sortMode==='likes')    { var dl=(b.likeCount||0)-(a.likeCount||0); if(dl) return dl; return (a.createdAt||0)-(b.createdAt||0); }
     if(sortMode==='comments') { var dc=((b.comments?b.comments.length:0))-((a.comments?a.comments.length:0)); if(dc) return dc; return (a.createdAt||0)-(b.createdAt||0); }
     // manual：ドラッグで決めた並び（sortOrder）→ 作成順
@@ -535,6 +552,7 @@ var App = (function(){
       +'<div class="bar-actions">'
       +'<select class="sort-select" onchange="App.setSort(this.value)" title="並べ替え">'
         +sortOpt('manual','標準（古い順）')+sortOpt('new','新しい順')
+        +sortOpt('roster','名簿順（出席番号）')
         +sortOpt('likes','いいねが多い順')+sortOpt('comments','コメントが多い順')
       +'</select>'
       +(isTeacher?'<button class="ghost-btn" onclick="App.addSection()">＋ セクション</button>':'')
@@ -619,6 +637,7 @@ var App = (function(){
   function buildColumn(sec, cards, isTeacher){
     var colEl=document.createElement('div');
     colEl.className='section-col'; colEl.dataset.sectionId=sec.sectionId;
+    if(sec._none) colEl.dataset.orphan='1';
 
     // セクション色（先生が設定）。色があれば上部にアクセントバー＋ヘッダーを淡く着色。
     var color=sec.color||'';
@@ -634,10 +653,19 @@ var App = (function(){
         +'<button title="削除" data-act="del">🗑</button></span>';
     }
     var addBtn = (!sec._none && (user||teacherPass)) ? '<button class="add-bar" data-act="add">＋ 投稿</button>' : '';
-    head.innerHTML='<div class="col-title"><span class="sec-name">'+esc(sec.name)
+    // 先生はつまみ（⠿）を左右にドラッグしてセクションの並び順を入れ替えられる
+    var grip = (isTeacher && !sec._none)
+      ? '<button class="sec-grip" data-act="grip" title="ドラッグでセクションを入れ替え">⠿</button>' : '';
+    head.innerHTML='<div class="col-title">'+grip+'<span class="sec-name">'+esc(sec.name)
       +'<span class="count">'+cards.length+'</span></span>'+tools+'</div>'
       +addBtn;
     colEl.appendChild(head);
+    if(grip){
+      var gripEl=head.querySelector('[data-act="grip"]');
+      gripEl.addEventListener('pointerdown',function(e){ startSecDrag(e,colEl); });
+      // つまみからのカードドラッグ（HTML5 DnD）が誤発火しないように
+      gripEl.addEventListener('dragstart',function(e){ e.preventDefault(); });
+    }
     if(addBtn) head.querySelector('[data-act="add"]').addEventListener('click',function(){ openPost(sec.sectionId); });
     if(isTeacher && !sec._none){
       head.querySelector('[data-act="color"]').addEventListener('click',function(){ pickSectionColor(sec); });
@@ -915,6 +943,75 @@ var App = (function(){
     run('updateLayout',current.board.boardId,items).catch(err);
   }
 
+  // -------- セクションの並べ替え（先生・ドラッグ） --------
+  // マウスでもタッチでも同じように動かせるよう、HTML5 DnD ではなく pointer イベントで実装する。
+  function startSecDrag(e,colEl){
+    if(!teacherPass) return;
+    if(e.button!=null && e.button!==0) return;   // 右クリック等は無視
+    var board=$('board'); if(!board) return;
+    e.preventDefault(); e.stopPropagation();
+    secDrag={col:colEl,board:board,moved:false,scroll:0,timer:null};
+    colEl.classList.add('sec-dragging');
+    document.body.classList.add('sec-dragging');
+    // 端でつまみを止めたままでも横スクロールが続くようにする
+    secDrag.timer=setInterval(function(){
+      if(secDrag && secDrag.scroll) secDrag.board.scrollLeft+=secDrag.scroll;
+    },16);
+    document.addEventListener('pointermove',onSecMove,true);
+    document.addEventListener('pointerup',endSecDrag,true);
+    document.addEventListener('pointercancel',endSecDrag,true);
+  }
+  function onSecMove(e){
+    if(!secDrag) return;
+    e.preventDefault();
+    var board=secDrag.board, col=secDrag.col, x=e.clientX;
+    // 画面端では横スクロールして、離れたセクションとも入れ替えられるようにする
+    var br=board.getBoundingClientRect();
+    secDrag.scroll = (x<br.left+56) ? -18 : (x>br.right-56) ? 18 : 0;
+    // 「（未分類）」列は常に末尾のままにする
+    var others=[].slice.call(board.querySelectorAll('.section-col')).filter(function(c){
+      return c!==col && c.dataset.orphan!=='1';
+    });
+    var before=null;
+    for(var i=0;i<others.length;i++){
+      var r=others[i].getBoundingClientRect();
+      if(x < r.left+r.width/2){ before=others[i]; break; }
+    }
+    if(!before){
+      var orphan=board.querySelector('.section-col[data-orphan="1"]');
+      before=orphan||null;
+    }
+    if(before){ if(col.nextSibling!==before){ board.insertBefore(col,before); secDrag.moved=true; } }
+    else if(board.lastElementChild!==col){ board.appendChild(col); secDrag.moved=true; }
+  }
+  function endSecDrag(){
+    if(!secDrag) return;
+    var d=secDrag; secDrag=null;
+    if(d.timer) clearInterval(d.timer);
+    document.removeEventListener('pointermove',onSecMove,true);
+    document.removeEventListener('pointerup',endSecDrag,true);
+    document.removeEventListener('pointercancel',endSecDrag,true);
+    d.col.classList.remove('sec-dragging');
+    document.body.classList.remove('sec-dragging');
+    if(d.moved) saveSectionOrder(d.board);
+  }
+  function saveSectionOrder(board){
+    var ids=[].slice.call(board.querySelectorAll('.section-col'))
+      .map(function(c){ return c.dataset.sectionId; })
+      .filter(function(id){ return !!id; });   // （未分類）は除く
+    // 画面の並びをローカルにも反映（ポーリングでの差分比較がブレないように）
+    var byId={}; current.sections.forEach(function(s){ byId[s.sectionId]=s; });
+    var next=[];
+    ids.forEach(function(id,i){ if(byId[id]){ byId[id].sortOrder=i+1; next.push(byId[id]); delete byId[id]; } });
+    current.sections.forEach(function(s){ if(byId[s.sectionId]) next.push(s); });
+    current.sections=next;
+    lastSig=computeSig();
+    run('reorderSections',current.board.boardId,ids,teacherPass).then(function(secs){
+      if(secs&&secs.length) current.sections=secs;
+      lastSig=computeSig();
+    }).catch(function(e){ err(e); refreshBoard(); });
+  }
+
   // -------- セクション管理（先生） --------
   function addSection(){
     var name=prompt('新しいセクション名'); if(name==null)return; name=name.trim(); if(!name)return;
@@ -952,11 +1049,22 @@ var App = (function(){
       var u=(c.updatedAt||c.createdAt||0); if(u>maxMs)maxMs=u;
       likes+=c.likeCount||0; coms+=(c.comments?c.comments.length:0);
     });
-    return current.cards.length+'|'+maxMs+'|'+current.sections.length+'|'+likes+'|'+coms;
+    return current.cards.length+'|'+maxMs+'|'+secSigPart()+'|'+likes+'|'+coms;
+  }
+  // サーバーの computeBoardSignature_ と同じ計算（ズレると無駄な再取得が起きるので注意）
+  function hashStr(str){
+    var h=0; str=String(str||'');
+    for(var i=0;i<str.length;i++){ h=(h*31+str.charCodeAt(i))|0; }
+    return String(h);
+  }
+  function secSigPart(){
+    return current.sections.length+'.'+hashStr(current.sections.map(function(s){
+      return s.sectionId+':'+(s.name==null?'':String(s.name))+':'+(s.color||'')+':'+(Number(s.sortOrder)||0);
+    }).sort().join('|'));
   }
   function busy(){
     if($('modalRoot').innerHTML || document.querySelector('.lightbox')) return true;
-    if(dragEl) return true;
+    if(dragEl || secDrag) return true;
     var a=document.activeElement;
     if(a && (a.tagName==='INPUT'||a.tagName==='TEXTAREA')) return true;
     if(Date.now()-lastScrollTs < 2500) return true; // スクロール中・直後は再描画しない

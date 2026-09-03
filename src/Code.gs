@@ -15,7 +15,7 @@ var PROP_SCHEMA_VERSION = 'SCHEMA_VERSION';
 var SCHEMA_VERSION = '9';
 // クライアント(Index.html)の APP_BUILD と必ず一致させること。
 // デプロイ更新忘れ（古いコードが動いている状態）を検知するために使う。
-var APP_BUILD = '23';
+var APP_BUILD = '24';
 
 var SHEET_STUDENTS = 'Students';
 var SHEET_BOARDS = 'Boards';
@@ -737,6 +737,36 @@ function deleteSection(sectionId, teacherPassword) {
   return getSections(boardId);
 }
 
+/**
+ * セクションの並び順を保存（先生のみ）。orderedIds は左から右の順のセクションID。
+ * 渡されなかったセクションは末尾に元の順で残す。
+ */
+function reorderSections(boardId, orderedIds, teacherPassword) {
+  if (!isTeacher_(teacherPassword)) throw new Error('セクションの操作は先生のみ可能です。');
+  var sheet = getSheet_(SHEET_SECTIONS);
+  var orderCol = SHEET_DEFS[SHEET_SECTIONS].indexOf('sortOrder') + 1;
+  var rowById = {};
+  readSheet_(SHEET_SECTIONS).forEach(function (s) {
+    if (s.boardId === boardId) rowById[s.sectionId] = s._row;
+  });
+  var idx = 0;
+  var placed = {};
+  (orderedIds || []).forEach(function (id) {
+    if (!rowById[id] || placed[id]) return;
+    placed[id] = true;
+    idx++;
+    sheet.getRange(rowById[id], orderCol).setValue(idx);
+  });
+  // 並び替え対象に含まれなかったセクション（別端末での追加など）は末尾へ
+  getSections(boardId).forEach(function (s) {
+    if (placed[s.sectionId] || !rowById[s.sectionId]) return;
+    idx++;
+    sheet.getRange(rowById[s.sectionId], orderCol).setValue(idx);
+  });
+  clearSig_(boardId);
+  return getSections(boardId);
+}
+
 /** ボードに最低1つセクションがあることを保証し、既定セクションIDを返す。 */
 function ensureDefaultSection_(boardId) {
   var secs = getSections(boardId);
@@ -804,7 +834,22 @@ function getBoardData(boardId, currentName) {
   });
   cards.sort(cardCompare_);
 
-  return { board: board, sections: getSections(boardId), cards: cards };
+  return { board: board, sections: getSections(boardId), cards: cards, roster: getBoardRoster_(boardId, board) };
+}
+
+/**
+ * ボードのクラスの名簿（出席番号順の並べ替えに使う）。
+ * 名前と出席番号だけを返す（パスワード等は返さない）。
+ */
+function getBoardRoster_(boardId, board) {
+  board = board || getBoard(boardId);
+  if (!board) return [];
+  var classId = String(board.classId || '');
+  var roster = readSheet_(SHEET_STUDENTS)
+    .filter(function (s) { return String(s.classId || '') === classId; })
+    .map(function (s) { return { number: Number(s.number) || 0, name: asText_(s.name) }; });
+  roster.sort(function (a, b) { return a.number - b.number; });
+  return roster;
 }
 
 /** ピン留め優先 → 並び順 → 作成日時 の順で比較。 */
@@ -839,12 +884,24 @@ function computeBoardSignature_(boardId) {
     var u = toMs_(r.updatedAt) || toMs_(r.createdAt) || 0;
     if (u > maxMs) maxMs = u;
   });
-  var secCount = readSheet_(SHEET_SECTIONS).filter(function (s) { return s.boardId === boardId; }).length;
+  // セクションは数だけでなく「並び順・名前・色」の変化も拾う（他の端末へ即反映するため）
+  var secs = readSheet_(SHEET_SECTIONS).filter(function (s) { return s.boardId === boardId; });
+  var secCount = secs.length + '.' + hashString_(secs.map(function (s) {
+    return s.sectionId + ':' + asText_(s.name) + ':' + (s.color || '') + ':' + (Number(s.sortOrder) || 0);
+  }).sort().join('|'));
   // いいね・コメントの増減も拾うため総数を含める（このボード分に限定）
   var likeCount = readSheet_(SHEET_LIKES).filter(function (l) { return refIds[l.reflectionId]; }).length;
   var comCount = readSheet_(SHEET_COMMENTS).filter(function (c) { return refIds[c.reflectionId]; }).length;
   return refCount + '|' + maxMs + '|' + secCount + '|' + likeCount + '|' + comCount;
 }
+/** 文字列を短い数値文字列にまとめる（シグネチャ用の簡易ハッシュ）。 */
+function hashString_(str) {
+  var h = 0;
+  str = String(str || '');
+  for (var i = 0; i < str.length; i++) { h = (h * 31 + str.charCodeAt(i)) | 0; }
+  return String(h);
+}
+
 /** ボードのシグネチャ・キャッシュを無効化（書き込み後に呼ぶと即反映される）。 */
 function clearSig_(boardId) {
   if (!boardId) return;
