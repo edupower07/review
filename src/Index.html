@@ -227,6 +227,9 @@
     .row-form{display:flex;gap:8px;flex-wrap:wrap;align-items:flex-end;margin:16px 0}
     .row-form .field{margin-bottom:0;flex:1;min-width:140px}
 
+    /* デプロイの直し方を目立たせる枠（設定→システム状態） */
+    .fixbox{background:#fff;border:1px solid var(--border);border-left:5px solid var(--accent);
+      border-radius:10px;padding:12px 14px;margin-top:10px;font-size:14px;line-height:1.8;color:var(--text)}
     .toast{position:fixed;bottom:24px;left:50%;transform:translateX(-50%);background:#333;color:#fff;
       padding:12px 20px;border-radius:10px;z-index:300;font-size:14px}
     .empty{text-align:center;color:var(--muted);padding:48px 16px}
@@ -272,7 +275,7 @@
 // ============================================================
 var App = (function(){
   // サーバー(Code.gs)の APP_BUILD と必ず一致させること。ズレていれば「デプロイ未更新」を警告する。
-  var APP_BUILD = '25';
+  var APP_BUILD = '26';
   var COLORS = ['#fff7c0','#ffd1dc','#c8f0d0','#cfe3ff','#e8d6ff','#ffe2bf','#ffffff'];
   // セクションの色分け用パレット（先生が選ぶ）
   var SECTION_COLORS = ['#e8554e','#e08a3c','#d9a400','#2faf6b','#2796a8','#3f7fd6','#8c5bd0','#d24b8c','#7a8b3c','#6a7a8c'];
@@ -311,7 +314,61 @@ var App = (function(){
   function setCrumb(t){ $('crumb').textContent = t ? '/ '+t : ''; }
   function toast(m){var t=$('toast');t.textContent=m;t.classList.remove('hidden');clearTimeout(t._t);t._t=setTimeout(function(){t.classList.add('hidden');},2600);}
   function fmt(d){if(d==null||d==='')return '';var x=new Date(d);if(isNaN(x))return '';return (x.getMonth()+1)+'/'+x.getDate()+' '+('0'+x.getHours()).slice(-2)+':'+('0'+x.getMinutes()).slice(-2);}
-  function run(fn){var a=[].slice.call(arguments,1);return new Promise(function(res,rej){var r=google.script.run.withSuccessHandler(res).withFailureHandler(rej);if(typeof r[fn]!=='function'){rej(new Error('サーバー機能「'+fn+'」が見つかりません。まずこのページを再読み込み（Ctrl+Shift+R）してください。直らなければ Code.gs を全文貼り直し→デプロイのバージョンを更新してください。'));return;}r[fn].apply(r,a);});}
+  // この画面が使うサーバー(Code.gs)の関数。デプロイが古いと足りない関数が出るので点検に使う。
+  var SERVER_FUNCTIONS=['getLoginInfo','getServerInfo','studentLogin','teacherLogin',
+    'getTeacherSettings','setTeacherName','setTeacherPassword',
+    'getClasses','createClass','renameClass','deleteClass',
+    'getStudents','addStudent','importStudents','removeStudent','resetStudentPassword','setStudentNumber',
+    'getBoards','createBoard','deleteBoard','copyBoard','setBoardArchived',
+    'getBoardData','getBoardSignature','updateLayout',
+    'createSection','renameSection','deleteSection','setSectionColor','reorderSections',
+    'postReflection','editReflection','deleteReflection','togglePin','toggleReaction','addComment',
+    'exportBoard','exportStudent'];
+  // デプロイに含まれていない関数の一覧（空なら最新）
+  function missingServerFunctions(){
+    var r; try{ r=google.script.run; }catch(e){ return SERVER_FUNCTIONS.slice(); }
+    if(!r) return SERVER_FUNCTIONS.slice();
+    return SERVER_FUNCTIONS.filter(function(f){ return typeof r[f]!=='function'; });
+  }
+  // 関数名が大量に並ぶと読めないので、先頭だけ出して残りは件数にまとめる
+  function missingList(miss,max){
+    max=max||8;
+    if(miss.length<=max) return miss.join('、');
+    return miss.slice(0,max).join('、')+'、…（ほか'+(miss.length-max)+'個）';
+  }
+  var DEPLOY_FIX='【直し方】① Apps Script を開き、GitHub の src/Code.gs の中身を「コード.gs」に全文貼り付けて保存'
+    +' ② 右上「デプロイ」→「デプロイを管理」→ ✏（編集）→ バージョンを「新しいバージョン」にして「デプロイ」'
+    +' ③ このページを再読み込み（Ctrl+Shift+R / スマホは更新）。';
+  function run(fn){
+    var a=[].slice.call(arguments,1);
+    return new Promise(function(res,rej){
+      var r=google.script.run.withSuccessHandler(res).withFailureHandler(rej);
+      if(typeof r[fn]!=='function'){
+        diagnoseDeploy(fn);
+        rej(new Error('サーバー機能「'+fn+'」が、公開中のウェブアプリに入っていません（Code.gs が古いままです）。'));
+        return;
+      }
+      r[fn].apply(r,a);
+    });
+  }
+  // 「サーバー機能が見つかりません」が出たとき、原因を具体的に画面へ出す（1回だけ）
+  var deployNoticeShown=false;
+  function diagnoseDeploy(fn){
+    if(deployNoticeShown) return; deployNoticeShown=true;
+    var miss=missingServerFunctions();
+    var head='この画面（build '+APP_BUILD+'）が使う機能「'+fn+'」が、公開中のウェブアプリの Code.gs にありません。';
+    var others=miss.filter(function(x){return x!==fn;});
+    var list=others.length?('ほかに不足：'+missingList(others,6)+'。'):'';
+    var show=function(serverBuild){
+      showErrorBanner(head+'（サーバーの Code.gs：build '+(serverBuild||'不明')+' ／ この画面：build '+APP_BUILD+'）'+list+DEPLOY_FIX);
+    };
+    try{
+      var r=google.script.run;
+      if(typeof r.getServerInfo!=='function'){ show('かなり古い'); return; }
+      r.withSuccessHandler(function(info){ show(info&&info.build); })
+       .withFailureHandler(function(){ show(''); }).getServerInfo();
+    }catch(e){ show(''); }
+  }
   function errMsg(e){return (e&&e.message)?e.message:(e==null?'不明なエラー':String(e));}
   function err(e){
     console.error(e);
@@ -419,10 +476,9 @@ var App = (function(){
   // サーバー(デプロイ済みコード)が最新かを確認。古ければ赤バナーで警告する。
   function checkBuild(serverBuild){
     if(serverBuild===APP_BUILD) return;
-    showErrorBanner('アプリのコードが新しくなっていますが、ウェブアプリのデプロイが古いままです'
-      +'（画面: '+APP_BUILD+' / サーバー: '+(serverBuild||'不明')+'）。'
-      +'Apps Scriptで「デプロイを管理 → 編集 → バージョン: 新バージョン」を実行し、'
-      +'初回は setup 関数を実行して権限を承認してください。');
+    showErrorBanner('ウェブアプリのデプロイが古いままです（この画面: build '+APP_BUILD
+      +' ／ サーバーの Code.gs: build '+(serverBuild||'不明')+'）。'
+      +'このままだと新しい機能（セクションの入れ替えなど）でエラーになります。'+DEPLOY_FIX);
   }
   function exitLoginMode(){ document.body.classList.remove('login-mode'); }
 
@@ -1418,6 +1474,8 @@ var App = (function(){
        getTeacherPass:function(){return teacherPass;},setTeacherPass:function(p){teacherPass=p;},
        getTeacherName:function(){return teacherName;},setTeacherName:function(n){teacherName=n;updateHeader();},
        appBuild:function(){return APP_BUILD;},
+       missingServerFunctions:missingServerFunctions,missingList:missingList,
+       deployFix:function(){return DEPLOY_FIX;},
        COLORS:COLORS,subjColor:subjColor}
   };
 })();
@@ -1526,15 +1584,22 @@ var Teacher=(function(){
     }).catch(U.err);
   }
   function loadSysInfo(){
+    var miss=U.missingServerFunctions();
+    var fnLine=miss.length
+      ? '⚠️ サーバー機能：<b style="color:#c0392b">'+miss.length+'個が足りません</b>（'+U.esc(U.missingList(miss,8))+'）'
+      : '✅ サーバー機能：この画面が使う機能はすべて揃っています';
     U.run('getServerInfo').then(function(s){
       var ok=(s.build===U.appBuild());
-      var line=(ok?'✅':'⚠️')+' デプロイ：'+(ok?'最新です':'<b style="color:#c0392b">古いです（デプロイのバージョン更新が必要）</b>')
+      var line=(ok?'✅':'⚠️')+' デプロイ：'+(ok?'最新です':'<b style="color:#c0392b">古いです（Code.gs の貼り直しとデプロイのバージョン更新が必要）</b>')
         +'（画面 '+U.appBuild()+' / サーバー '+U.esc(s.build||'不明')+'）';
       var box=document.getElementById('sysInfo');
-      if(box) box.innerHTML='<div style="line-height:2">'+line+'</div>';
+      if(box) box.innerHTML='<div style="line-height:2;width:100%">'+line+'<br>'+fnLine
+        +((ok&&!miss.length)?'':'<div class="fixbox">'+U.esc(U.deployFix())+'</div>')+'</div>';
     }).catch(function(e){
       var box=document.getElementById('sysInfo');
-      if(box) box.innerHTML='<span style="color:#c0392b">確認できませんでした：'+U.esc((e&&e.message)||e)+'</span>';
+      if(box) box.innerHTML='<div style="line-height:2;width:100%"><span style="color:#c0392b">デプロイの確認ができませんでした：'
+        +U.esc((e&&e.message)||e)+'</span><br>'+fnLine
+        +'<div class="fixbox">'+U.esc(U.deployFix())+'</div></div>';
     });
   }
   function saveName(){
