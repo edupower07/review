@@ -140,6 +140,7 @@
       background:#fff7c0;cursor:grab}
     .card .vid{width:100%;height:160px;border:0;border-radius:10px;margin-top:8px;display:block}
     .card.dragging{opacity:.4}
+    .card.nodrag{cursor:default}
     .card.pinned{box-shadow:0 0 0 2px var(--accent2),0 3px 10px rgba(0,0,0,.14)}
     .pin-strip{font-size:11px;color:var(--accent2);font-weight:700;margin:-2px 0 6px}
     /* 投稿者（小さめ） */
@@ -271,7 +272,7 @@
 // ============================================================
 var App = (function(){
   // サーバー(Code.gs)の APP_BUILD と必ず一致させること。ズレていれば「デプロイ未更新」を警告する。
-  var APP_BUILD = '24';
+  var APP_BUILD = '25';
   var COLORS = ['#fff7c0','#ffd1dc','#c8f0d0','#cfe3ff','#e8d6ff','#ffe2bf','#ffffff'];
   // セクションの色分け用パレット（先生が選ぶ）
   var SECTION_COLORS = ['#e8554e','#e08a3c','#d9a400','#2faf6b','#2796a8','#3f7fd6','#8c5bd0','#d24b8c','#7a8b3c','#6a7a8c'];
@@ -336,16 +337,23 @@ var App = (function(){
   // -------- モーダル --------
   function modal(html){ $('modalRoot').innerHTML = '<div class="modal"><div class="modal-card">'+html+'</div></div>'; }
   function closeModal(){ $('modalRoot').innerHTML=''; }
+  // Esc でモーダルを閉じる（拡大表示が開いているときはそちらが優先して閉じる）
+  document.addEventListener('keydown',function(e){
+    if(e.key!=='Escape') return;
+    if(document.querySelector('.lightbox')) return;
+    if($('modalRoot').innerHTML) closeModal();
+  });
 
   // ============== ログイン ==============
   function home(){
+    stopPolling(); current.board=null;
     if(teacherPass){ Teacher.open(); return; }
     if(user){ boardList(); return; }
     login();
   }
   var loginInfo=null, loginClass=null;
   function login(){
-    stopPolling();
+    stopPolling(); current.board=null;
     user=null; teacherPass=null; loginClass=null; setCrumb(''); updateHeader();
     document.body.classList.remove('board-view');
     document.body.classList.add('login-mode');
@@ -431,7 +439,12 @@ var App = (function(){
         +'<div class="modal-actions"><button class="ghost-btn" onclick="App.closeModal()">やめる</button>'
         +'<button class="primary-btn" onclick="App.doLogin('+JSON.stringify(s.name).replace(/"/g,'&quot;')+',true)">設定してログイン</button></div>');
     }
+    // Enter キーでもログインできるように（タブレットのキーボードでも押しやすい）
+    bindEnter(['pw','pw2'],function(){ doLogin(s.name,!s.hasPassword); });
     setTimeout(function(){var e=$('pw');if(e)e.focus();},50);
+  }
+  function bindEnter(ids,fn){
+    ids.forEach(function(id){ var el=$(id); if(el) el.addEventListener('keydown',function(e){ if(e.key==='Enter'){ e.preventDefault(); fn(); } }); });
   }
   function doLogin(name, isNew){
     var pw=$('pw').value;
@@ -451,6 +464,7 @@ var App = (function(){
       +'<label class="field"><span>パスワード</span><input id="tpw" type="password" autocomplete="off"></label>'
       +'<div class="modal-actions"><button class="ghost-btn" onclick="App.closeModal()">やめる</button>'
       +'<button class="primary-btn" onclick="App.doTeacherLogin()">ログイン</button></div>');
+    bindEnter(['tpw'],doTeacherLogin);
     setTimeout(function(){var e=$('tpw');if(e)e.focus();},50);
   }
   function doTeacherLogin(){
@@ -507,6 +521,7 @@ var App = (function(){
     current.board=data.board;
     current.sections=data.sections||[];
     current.cards=data.cards||[];
+    lastSig=data.sig||'';   // サーバーが計算したシグネチャをそのまま覚える
     if(data.roster) current.roster=data.roster;
     rosterNo={};
     (current.roster||[]).forEach(function(s){ if(s&&s.name) rosterNo[s.name]=Number(s.number)||0; });
@@ -565,14 +580,18 @@ var App = (function(){
       +(user?'<label><input type="checkbox" '+(onlyMine?'checked':'')+' onchange="App.toggleMine(this.checked)">自分の投稿だけ</label>':'')
       +'<label><input type="checkbox" '+(onlyMedia?'checked':'')+' onchange="App.toggleMedia(this.checked)">写真・動画つきだけ</label>'
       +'<span class="fcount" id="fcount"></span>'
+      +(sortMode!=='manual'?'<span class="fcount">※カードの移動は並べ替え「標準」のときだけ</span>':'')
       +'</div>';
     // 再描画前のスクロール位置を保存（更新で先頭に戻らないように）
     var prevBoard=$('board');
     var savedLeft=prevBoard?prevBoard.scrollLeft:0, savedTops={};
     if(prevBoard){ [].slice.call(prevBoard.querySelectorAll('.card-list')).forEach(function(l){ savedTops[l.dataset.sectionId||'']=l.scrollTop; }); }
+    // 検索ボックスに入力中なら、再描画後もカーソルを戻す
+    var ae=document.activeElement, searchFocused=!!(ae && ae.classList && ae.classList.contains('search'));
 
     view().innerHTML=bar+fbar+'<div id="board"></div>';
     var board=$('board');
+    if(searchFocused){ var sb=view().querySelector('.search'); if(sb){ sb.focus(); try{ sb.setSelectionRange(sb.value.length,sb.value.length); }catch(e){} } }
 
     // セクションごとにカードを振り分け
     var bySection={};
@@ -588,7 +607,6 @@ var App = (function(){
           ? 'まだセクションがありません。<br>右上の「＋ セクション」で追加してください。'
           : 'まだセクションがありません。<br>先生が用意するまで待っててね。')
         +'</div>';
-      lastSig=computeSig();
       return;
     }
 
@@ -600,7 +618,6 @@ var App = (function(){
     [].slice.call(board.querySelectorAll('.card-list')).forEach(function(l){
       var k=l.dataset.sectionId||''; if(savedTops[k]!=null) l.scrollTop=savedTops[k];
     });
-    lastSig=computeSig();
   }
 
   // -------- 絞り込み（クライアント側のみ・通信なし） --------
@@ -686,8 +703,9 @@ var App = (function(){
 
   function cardEl(r){
     var d=document.createElement('div');
-    d.className='card'+(r.pinned?' pinned':''); d.style.background=r.color||'#fff7c0';
-    d.setAttribute('draggable','true'); d.dataset.id=r.reflectionId;
+    var canDrag=(sortMode==='manual');   // 並べ替え中に動かすと「標準」の順番が勝手に書き換わるので止める
+    d.className='card'+(r.pinned?' pinned':'')+(canDrag?'':' nodrag'); d.style.background=r.color||'#fff7c0';
+    d.setAttribute('draggable',canDrag?'true':'false'); d.dataset.id=r.reflectionId;
     var canEdit = teacherPass || (user && user.name===r.studentName);
     var media='';
     if(r.photoUrl){
@@ -796,7 +814,6 @@ var App = (function(){
       var cnt=list.parentNode.querySelector('.col-title .count'); if(cnt) cnt.textContent=desired.length;
     });
     applyFilters();
-    lastSig=computeSig();
   }
   function closeAllMenus(){ [].forEach.call(document.querySelectorAll('.card .menu'),function(m){m.classList.add('hidden');}); }
   document.addEventListener('click',closeAllMenus);
@@ -845,10 +862,10 @@ var App = (function(){
     var have=!!r.myReactions[type];
     if(have){ delete r.myReactions[type]; r.reactions[type]=Math.max(0,(r.reactions[type]||0)-1); r.likeCount=Math.max(0,(r.likeCount||0)-1); }
     else { r.myReactions[type]=true; r.reactions[type]=(r.reactions[type]||0)+1; r.likeCount=(r.likeCount||0)+1; }
-    updateReactDom(r,d); lastSig=computeSig();
+    updateReactDom(r,d);
     run('toggleReaction',r.reflectionId,user.name,user.password,type,user.classId,current.board?current.board.boardId:null).then(function(res){
       r.reactions=res.reactions; r.myReactions=res.myReactions; r.likeCount=res.count;
-      updateReactDom(r,d); lastSig=computeSig();
+      updateReactDom(r,d);
     }).catch(function(e){
       // 失敗時は楽観更新を戻す
       if(have){ r.myReactions[type]=true; r.reactions[type]=(r.reactions[type]||0)+1; r.likeCount=(r.likeCount||0)+1; }
@@ -870,7 +887,7 @@ var App = (function(){
     var np=!r.pinned; r.pinned=np; r.updatedAt=Date.now();
     renderBoard();
     run('togglePin',r.reflectionId,user?user.name:null,user?user.password:null,teacherPass,user?user.classId:null)
-      .then(function(res){ r.pinned=res.pinned; lastSig=computeSig(); })
+      .then(function(res){ r.pinned=res.pinned; })
       .catch(function(e){ r.pinned=!np; renderBoard(); err(e); });
   }
   // コメントは投稿の下に常時表示
@@ -886,7 +903,7 @@ var App = (function(){
       var send=function(){
         var t=input.value.trim(); if(!t)return; btn.disabled=true;
         run('addComment',r.reflectionId,user.name,user.password,t,user.classId,current.board?current.board.boardId:null).then(function(list){
-          r.comments=list; renderComments(r,d); lastSig=computeSig();
+          r.comments=list; renderComments(r,d);
         }).catch(function(e){err(e);btn.disabled=false;});
       };
       btn.addEventListener('click',send);
@@ -897,7 +914,6 @@ var App = (function(){
     if(!confirm('この投稿を削除しますか？'))return;
     var node=cardNode(r.reflectionId); if(node)node.remove();
     current.cards=current.cards.filter(function(c){return c.reflectionId!==r.reflectionId;});
-    lastSig=computeSig();
     run('deleteReflection',r.reflectionId,user?user.name:null,user?user.password:null,teacherPass,user?user.classId:null)
       .catch(function(e){ err(e); refreshBoard(); });
   }
@@ -939,8 +955,8 @@ var App = (function(){
     // ローカルの current.cards にも反映（次のポーリング比較がブレないように）
     var map={}; items.forEach(function(it,i){ map[it.id]={sec:it.sectionId,ord:i+1}; });
     current.cards.forEach(function(c){ if(map[c.reflectionId]){ c.sectionId=map[c.reflectionId].sec; c.sortOrder=map[c.reflectionId].ord; } });
-    lastSig=computeSig();
-    run('updateLayout',current.board.boardId,items).catch(err);
+    run('updateLayout',current.board.boardId,items,user?user.name:null,user?user.password:null,teacherPass,user?user.classId:null)
+      .catch(function(e){ err(e); refreshBoard(); });
   }
 
   // -------- セクションの並べ替え（先生・ドラッグ） --------
@@ -1005,10 +1021,8 @@ var App = (function(){
     ids.forEach(function(id,i){ if(byId[id]){ byId[id].sortOrder=i+1; next.push(byId[id]); delete byId[id]; } });
     current.sections.forEach(function(s){ if(byId[s.sectionId]) next.push(s); });
     current.sections=next;
-    lastSig=computeSig();
     run('reorderSections',current.board.boardId,ids,teacherPass).then(function(secs){
       if(secs&&secs.length) current.sections=secs;
-      lastSig=computeSig();
     }).catch(function(e){ err(e); refreshBoard(); });
   }
 
@@ -1043,30 +1057,14 @@ var App = (function(){
   }
 
   // -------- リアルタイム更新（ポーリング） --------
-  function computeSig(){
-    var maxMs=0, likes=0, coms=0;
-    current.cards.forEach(function(c){
-      var u=(c.updatedAt||c.createdAt||0); if(u>maxMs)maxMs=u;
-      likes+=c.likeCount||0; coms+=(c.comments?c.comments.length:0);
-    });
-    return current.cards.length+'|'+maxMs+'|'+secSigPart()+'|'+likes+'|'+coms;
-  }
-  // サーバーの computeBoardSignature_ と同じ計算（ズレると無駄な再取得が起きるので注意）
-  function hashStr(str){
-    var h=0; str=String(str||'');
-    for(var i=0;i<str.length;i++){ h=(h*31+str.charCodeAt(i))|0; }
-    return String(h);
-  }
-  function secSigPart(){
-    return current.sections.length+'.'+hashStr(current.sections.map(function(s){
-      return s.sectionId+':'+(s.name==null?'':String(s.name))+':'+(s.color||'')+':'+(Number(s.sortOrder)||0);
-    }).sort().join('|'));
-  }
+  // シグネチャはサーバーが計算したものをそのまま覚える（lastSig）。自分の操作の後は
+  // 次のポーリングで1回だけ取り直すが、サーバー側でキャッシュされているので軽い。
   function busy(){
     if($('modalRoot').innerHTML || document.querySelector('.lightbox')) return true;
     if(dragEl || secDrag) return true;
     var a=document.activeElement;
-    if(a && (a.tagName==='INPUT'||a.tagName==='TEXTAREA')) return true;
+    // 入力中は再描画しない（検索ボックスは再描画してもカーソルを戻すので対象外）
+    if(a && (a.tagName==='INPUT'||a.tagName==='TEXTAREA') && !(a.classList&&a.classList.contains('search'))) return true;
     if(Date.now()-lastScrollTs < 2500) return true; // スクロール中・直後は再描画しない
     return false;
   }
@@ -1074,11 +1072,12 @@ var App = (function(){
     stopPolling();
     pollTimer=setInterval(function(){
       if(!current.board||current.board.boardId!==boardId) return;
+      if(!$('board')) return;                 // ボード画面を離れていたら何もしない
       if(document.hidden || busy()) return;
       run('getBoardSignature',boardId).then(function(sig){
         if(sig!==lastSig){
           run('getBoardData',boardId,user?user.name:null).then(function(data){
-            if(!current.board||current.board.boardId!==boardId) return;
+            if(!current.board||current.board.boardId!==boardId||!$('board')) return;
             if(busy()) return; // 取得中に操作が始まったら今回はスキップ
             reconcileBoard(data); setSeen(boardId, current.cards.length);
           }).catch(function(){});
@@ -1390,14 +1389,14 @@ var App = (function(){
           var u=res.update, card=findCard(u.reflectionId);
           if(card){ card.title=u.title; card.text=u.text; card.color=u.color; card.photoUrl=u.photoUrl; card.mediaType=u.mediaType; card.link=u.link; card.updatedAt=u.updatedAt; replaceCardDom(card); }
           else refreshBoard();
-          closeModal(); toast('保存しました'); lastSig=computeSig();
+          closeModal(); toast('保存しました');
         }).catch(fail);
     }else{
       var sName=user?user.name:null, sPw=user?user.password:null, tPw=(!user&&teacherPass)?teacherPass:null;
       run('postReflection',current.board.boardId,postSectionId,sName,sPw,title,text,pickedColor,pendingMedia,pendingLink,tPw,user?user.classId:null)
         .then(function(res){
           var card=res.card; current.cards.push(card); insertCardDom(card);
-          closeModal(); toast('投稿しました！'); lastSig=computeSig();
+          closeModal(); toast('投稿しました！');
         }).catch(fail);
     }
   }
@@ -1559,7 +1558,7 @@ var Teacher=(function(){
     U.spinner();
     ensureClasses().then(function(){
       if(!classesCache.length){ U.view().innerHTML=noClassMsg(); return; }
-      U.run('getStudents',curClass).then(function(students){
+      U.run('getStudents',curClass,U.getTeacherPass()).then(function(students){
       var html=tabsBar()+classBar()+'<div class="section-title"><h2>名簿（'+U.esc(className_(curClass))+'）</h2></div>';
       html+='<div class="row-form">'
         +'<label class="field" style="max-width:110px"><span>出席番号</span><input id="sNum" type="number"></label>'
@@ -1573,7 +1572,9 @@ var Teacher=(function(){
         html+='<table><tr><th>番号</th><th>名前</th><th>パスワード</th><th>操作</th></tr>';
         students.forEach(function(s){
           var nm=JSON.stringify(s.name).replace(/"/g,'&quot;');
-          html+='<tr><td>'+U.esc(s.number)+'</td><td>'+U.esc(s.name)+'</td>'
+          html+='<tr><td>'+U.esc(s.number)
+            +' <button class="ghost-btn" style="padding:2px 6px;font-size:12px" title="出席番号を変更" onclick="Teacher.editNumber('+nm+','+JSON.stringify(String(s.number==null?'':s.number)).replace(/"/g,'&quot;')+')">✏</button></td>'
+            +'<td>'+U.esc(s.name)+'</td>'
             +'<td>'+(s.hasPassword?'設定済み':'<span style="color:#c0a000">未設定</span>')+'</td>'
             +'<td><button class="ghost-btn" onclick="Teacher.resetPw('+nm+')">PWリセット</button> '
             +'<button class="ghost-btn danger" onclick="Teacher.removeStudent('+nm+')">削除</button></td></tr>';
@@ -1587,14 +1588,23 @@ var Teacher=(function(){
   function addStudent(){
     var n=document.getElementById('sNum').value, nm=document.getElementById('sName').value.trim();
     if(!nm){U.toast('名前を入力してください');return;}
-    U.run('addStudent',n,nm,curClass).then(roster).catch(U.err);
+    U.run('addStudent',n,nm,curClass,U.getTeacherPass()).then(roster).catch(U.err);
   }
   function bulkAdd(){
     var t=document.getElementById('bulk').value; if(!t.trim())return;
-    U.run('importStudents',t,curClass).then(function(){U.toast('登録しました');roster();}).catch(U.err);
+    U.run('importStudents',t,curClass,U.getTeacherPass()).then(function(res){
+      var added=(res&&res.added!=null)?res.added:null, skipped=(res&&res.skipped)||0;
+      U.toast(added==null?'登録しました':(added+'名を登録しました'+(skipped?'（登録済みの'+skipped+'名は飛ばしました）':'')));
+      roster();
+    }).catch(U.err);
   }
-  function removeStudent(name){ if(!confirm(name+' を削除しますか？'))return; U.run('removeStudent',name,curClass).then(roster).catch(U.err); }
-  function resetPw(name){ if(!confirm(name+' のパスワードをリセットしますか？（次回ログイン時に再設定）'))return; U.run('resetStudentPassword',name,curClass).then(function(){U.toast('リセットしました');roster();}).catch(U.err); }
+  function editNumber(name,cur){
+    var v=prompt(name+' の出席番号',cur||''); if(v==null)return; v=String(v).trim(); if(!v)return;
+    if(!/^\d+$/.test(v)){U.toast('数字で入力してください');return;}
+    U.run('setStudentNumber',name,curClass,Number(v),U.getTeacherPass()).then(function(){U.toast('変更しました');roster();}).catch(U.err);
+  }
+  function removeStudent(name){ if(!confirm(name+' を削除しますか？'))return; U.run('removeStudent',name,curClass,U.getTeacherPass()).then(roster).catch(U.err); }
+  function resetPw(name){ if(!confirm(name+' のパスワードをリセットしますか？（次回ログイン時に再設定）'))return; U.run('resetStudentPassword',name,curClass,U.getTeacherPass()).then(function(){U.toast('リセットしました');roster();}).catch(U.err); }
 
   // -------- ボード作成 --------
   function boards(){
@@ -1603,7 +1613,8 @@ var Teacher=(function(){
       if(!classesCache.length){ U.view().innerHTML=noClassMsg(); return; }
       U.run('getBoards', true, curClass).then(function(list){
       list=list||[];
-      var today=new Date().toISOString().slice(0,10);
+      // toISOString() は UTC なので朝9時前は前日になってしまう。端末のローカル日付を使う。
+      var d=new Date(), today=d.getFullYear()+'-'+('0'+(d.getMonth()+1)).slice(-2)+'-'+('0'+d.getDate()).slice(-2);
       var html=tabsBar()+classBar()+'<div class="section-title"><h2>ボードを作成（'+U.esc(className_(curClass))+'）</h2></div>';
       html+='<div class="row-form">'
         +'<label class="field"><span>教科</span><select id="bSub">'+SUBJECTS.map(function(s){return '<option>'+s+'</option>';}).join('')+'</select></label>'
@@ -1640,9 +1651,9 @@ var Teacher=(function(){
     var sub=document.getElementById('bSub').value, unit=document.getElementById('bUnit').value.trim(),
         date=document.getElementById('bDate').value, title=document.getElementById('bTitle').value.trim();
     if(!unit){U.toast('単元名を入力してください');return;}
-    U.run('createBoard',sub,unit,date,title,curClass).then(function(){U.toast('作成しました');boards();}).catch(U.err);
+    U.run('createBoard',sub,unit,date,title,curClass,U.getTeacherPass()).then(function(){U.toast('作成しました');boards();}).catch(U.err);
   }
-  function delBoard(id){ if(!confirm('このボードと投稿・写真をすべて削除します。よろしいですか？'))return; U.run('deleteBoard',id).then(function(){U.toast('削除しました');boards();}).catch(U.err); }
+  function delBoard(id){ if(!confirm('このボードと投稿・写真をすべて削除します。よろしいですか？'))return; U.run('deleteBoard',id,U.getTeacherPass()).then(function(){U.toast('削除しました');boards();}).catch(U.err); }
   function copyBoard(id){
     var opts=classesCache.map(function(c){return '<option value="'+U.esc(c.classId)+'"'+(c.classId===curClass?' selected':'')+'>'+U.esc(c.name)+'</option>';}).join('');
     U.modal('<h3>ボードをコピー</h3>'
@@ -1669,7 +1680,7 @@ var Teacher=(function(){
     U.spinner();
     ensureClasses().then(function(){
       if(!classesCache.length){ U.view().innerHTML=noClassMsg(); return; }
-      Promise.all([U.run('getBoards', true, curClass),U.run('getStudents', curClass)]).then(function(res){
+      Promise.all([U.run('getBoards', true, curClass),U.run('getStudents', curClass, U.getTeacherPass())]).then(function(res){
       var bs=res[0], sts=res[1];
       var html=tabsBar()+classBar()+'<div class="section-title"><h2>確認・出力（'+U.esc(className_(curClass))+'）</h2></div>';
       html+='<div class="row-form"><label class="field"><span>ボード全体を出力</span><select id="exB">'
@@ -1690,7 +1701,7 @@ var Teacher=(function(){
 
   function printBoard(){
     var id=document.getElementById('exB').value; if(!id){U.toast('ボードを選んでください');return;}
-    U.run('exportBoard',id).then(function(data){
+    U.run('exportBoard',id,U.getTeacherPass()).then(function(data){
       var b=data.board;
       var html='<div class="print-head"><h1>'+U.esc(b.title)+'</h1>'
         +'<div>'+U.esc(b.subject)+' ／ '+U.esc(b.unit)+' ／ '+U.esc(b.date)+' ／ 投稿数 '+data.cards.length+'件</div></div>';
@@ -1711,7 +1722,7 @@ var Teacher=(function(){
   }
   function printStudent(){
     var name=document.getElementById('exS').value; if(!name){U.toast('児童を選んでください');return;}
-    U.run('exportStudent',name,curClass).then(function(data){
+    U.run('exportStudent',name,curClass,U.getTeacherPass()).then(function(data){
       var html='<div class="print-head"><h1>'+U.esc(data.studentName)+' さんの振り返り</h1>'
         +'<div>件数 '+data.reflections.length+'件</div></div>';
       data.reflections.forEach(function(r){
@@ -1746,7 +1757,7 @@ var Teacher=(function(){
     setTimeout(function(){ window.print(); },300);
   }
 
-  return {open:open,go:go,addStudent:addStudent,bulkAdd:bulkAdd,removeStudent:removeStudent,resetPw:resetPw,
+  return {open:open,go:go,addStudent:addStudent,bulkAdd:bulkAdd,removeStudent:removeStudent,resetPw:resetPw,editNumber:editNumber,
     createBoard:createBoard,delBoard:delBoard,setArchived:setArchived,viewBoard:viewBoard,printBoard:printBoard,printStudent:printStudent,
     copyBoard:copyBoard,doCopyBoard:doCopyBoard,
     saveName:saveName,savePw:savePw,
