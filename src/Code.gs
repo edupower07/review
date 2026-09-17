@@ -12,10 +12,10 @@ var PROP_TEACHER_SALT = 'TEACHER_SALT';
 var PROP_TEACHER_NAME = 'TEACHER_NAME';
 var PROP_SCHEMA_VERSION = 'SCHEMA_VERSION';
 // SHEET_DEFS を変更したら必ずこの版数を上げる（次回アクセス時に1回だけ移行が走る）
-var SCHEMA_VERSION = '9';
+var SCHEMA_VERSION = '10';
 // クライアント(Index.html)の APP_BUILD と必ず一致させること。
 // デプロイ更新忘れ（古いコードが動いている状態）を検知するために使う。
-var APP_BUILD = '26';
+var APP_BUILD = '27';
 
 var SHEET_STUDENTS = 'Students';
 var SHEET_BOARDS = 'Boards';
@@ -31,11 +31,13 @@ SHEET_DEFS[SHEET_CLASSES] = ['classId', 'name', 'sortOrder', 'createdAt'];
 SHEET_DEFS[SHEET_STUDENTS] = ['number', 'name', 'salt', 'passwordHash', 'createdAt', 'classId'];
 // 末尾の archived / classId は後から追加した列
 SHEET_DEFS[SHEET_BOARDS] = ['boardId', 'subject', 'unit', 'date', 'title', 'createdAt', 'archived', 'classId'];
-// 末尾の color は後から追加した列（セクションの色分け用）
-SHEET_DEFS[SHEET_SECTIONS] = ['sectionId', 'boardId', 'name', 'sortOrder', 'createdAt', 'color'];
-// 末尾の sectionId / mediaType / updatedAt / pinned / title / link は後から追加した列（既存データは移行で保持）
-// link はリンクプレビュー情報(JSON文字列) {url,title,image,desc}
-SHEET_DEFS[SHEET_REFLECTIONS] = ['reflectionId', 'boardId', 'studentName', 'text', 'photoUrl', 'photoFileId', 'color', 'sortOrder', 'createdAt', 'sectionId', 'mediaType', 'updatedAt', 'pinned', 'title', 'link'];
+// 末尾の color / hidden は後から追加した列（色分け用・先生がセクションを非表示にするフラグ）
+SHEET_DEFS[SHEET_SECTIONS] = ['sectionId', 'boardId', 'name', 'sortOrder', 'createdAt', 'color', 'hidden'];
+// 末尾の sectionId / mediaType / updatedAt / pinned / title / link / hidden は後から追加した列（既存データは移行で保持）
+// link はリンクプレビュー情報の JSON文字列。複数URL対応後は配列 [{url,title,image,desc,site,favicon}, ...]
+//      （旧データの単体オブジェクト {url,...} も読み込み時に1件の配列として扱う）
+// hidden は先生が投稿を非表示にしたフラグ（児童には配信しない）
+SHEET_DEFS[SHEET_REFLECTIONS] = ['reflectionId', 'boardId', 'studentName', 'text', 'photoUrl', 'photoFileId', 'color', 'sortOrder', 'createdAt', 'sectionId', 'mediaType', 'updatedAt', 'pinned', 'title', 'link', 'hidden'];
 SHEET_DEFS[SHEET_COMMENTS] = ['commentId', 'reflectionId', 'author', 'text', 'createdAt'];
 // 末尾の type は後から追加した列（リアクションの種類。空＝❤）
 SHEET_DEFS[SHEET_LIKES] = ['reflectionId', 'studentName', 'createdAt', 'type'];
@@ -266,6 +268,9 @@ function readSheet_(name) {
 }
 
 function genId_(p) { return p + '_' + Utilities.getUuid().slice(0, 8); }
+
+/** シートのセル値を真偽値として読む（true / 'true' / 1 を真とみなす）。 */
+function truthy_(v) { return v === true || v === 1 || String(v).toLowerCase() === 'true'; }
 
 function deleteRowsWhere_(name, key, value) {
   return deleteRowsWhereIn_(name, key, [value]);
@@ -631,9 +636,18 @@ function getBoards(includeArchived, classId) {
   var boards = readSheet_(SHEET_BOARDS).map(rowToBoard_);
   if (classId != null && classId !== '') boards = boards.filter(function (b) { return String(b.classId || '') === String(classId); });
   if (!includeArchived) boards = boards.filter(function (b) { return !b.archived; });
-  // 未読バッジ用に各ボードの投稿数を付与（Reflections を1回読むだけ）
+  // 未読バッジ用に各ボードの投稿数を付与（Reflections を1回読むだけ）。
+  // 児童向けの一覧（includeArchived=false）では、非表示の投稿・非表示セクションの投稿は数えない
+  // （見えない投稿で「+3」のような未読バッジが出てしまうのを防ぐ）。
+  var hiddenSec = {};
+  if (!includeArchived) {
+    readSheet_(SHEET_SECTIONS).forEach(function (s) { if (truthy_(s.hidden)) hiddenSec[s.sectionId] = true; });
+  }
   var counts = {};
-  readSheet_(SHEET_REFLECTIONS).forEach(function (r) { counts[r.boardId] = (counts[r.boardId] || 0) + 1; });
+  readSheet_(SHEET_REFLECTIONS).forEach(function (r) {
+    if (!includeArchived && (truthy_(r.hidden) || hiddenSec[r.sectionId])) return;
+    counts[r.boardId] = (counts[r.boardId] || 0) + 1;
+  });
   boards.forEach(function (b) { b.cardCount = counts[b.boardId] || 0; });
   boards.sort(function (a, b) { return new Date(b.createdAt) - new Date(a.createdAt); });
   return boards;
@@ -740,7 +754,7 @@ function copyBoard(boardId, targetClassId, teacherPassword) {
   getSections(boardId).forEach(function (s) {
     var nid = genId_('s');
     secMap[s.sectionId] = nid;
-    secSheet.appendRow([nid, newId, "'" + s.name, s.sortOrder, new Date(), s.color || '']);
+    secSheet.appendRow([nid, newId, "'" + s.name, s.sortOrder, new Date(), s.color || '', !!s.hidden]);
   });
 
   // 先生名義の投稿だけを複製（児童の投稿は複製しない）
@@ -769,6 +783,7 @@ function copyBoard(boardId, targetClassId, teacherPassword) {
     row[defR.indexOf('pinned')] = pinned;
     row[defR.indexOf('title')] = "'" + asText_(r.title);
     row[defR.indexOf('link')] = r.link || '';
+    row[defR.indexOf('hidden')] = truthy_(r.hidden);
     refSheet.appendRow(row);
   });
   return getBoard(newId);
@@ -796,7 +811,12 @@ function deleteBoard(boardId, teacherPassword) {
 function getSections(boardId) {
   var secs = readSheet_(SHEET_SECTIONS)
     .filter(function (s) { return s.boardId === boardId; })
-    .map(function (s) { return { sectionId: s.sectionId, boardId: s.boardId, name: asText_(s.name), sortOrder: Number(s.sortOrder) || 0, color: s.color || '' }; });
+    .map(function (s) {
+      return {
+        sectionId: s.sectionId, boardId: s.boardId, name: asText_(s.name),
+        sortOrder: Number(s.sortOrder) || 0, color: s.color || '', hidden: truthy_(s.hidden)
+      };
+    });
   secs.sort(function (a, b) { return a.sortOrder - b.sortOrder; });
   return secs;
 }
@@ -810,7 +830,7 @@ function createSection(boardId, name, teacherPassword, color) {
   var maxOrder = 0;
   getSections(boardId).forEach(function (s) { if (s.sortOrder > maxOrder) maxOrder = s.sortOrder; });
   // 先頭に ' を付けて「テキスト」として保存（5/22 等が日付に変換されるのを防ぐ）
-  getSheet_(SHEET_SECTIONS).appendRow([genId_('s'), boardId, "'" + name, maxOrder + 1, new Date(), String(color || '')]);
+  getSheet_(SHEET_SECTIONS).appendRow([genId_('s'), boardId, "'" + name, maxOrder + 1, new Date(), String(color || ''), false]);
   clearSig_(boardId);
   return getSections(boardId);
 }
@@ -835,6 +855,20 @@ function renameSection(sectionId, name, teacherPassword) {
   var s = readSheet_(SHEET_SECTIONS).filter(function (x) { return x.sectionId === sectionId; })[0];
   if (!s) throw new Error('セクションが見つかりません。');
   sheet.getRange(s._row, SHEET_DEFS[SHEET_SECTIONS].indexOf('name') + 1).setValue("'" + name);
+  clearSig_(s.boardId);
+  return getSections(s.boardId);
+}
+
+/**
+ * セクションの表示／非表示を切り替え（先生のみ）。
+ * 非表示にすると、そのセクションと中の投稿は児童の画面に配信されません（データは残ります）。
+ */
+function setSectionHidden(sectionId, hidden, teacherPassword) {
+  requireTeacher_(teacherPassword, 'セクションの非表示');
+  var sheet = getSheet_(SHEET_SECTIONS);
+  var s = readSheet_(SHEET_SECTIONS).filter(function (x) { return x.sectionId === sectionId; })[0];
+  if (!s) throw new Error('セクションが見つかりません。');
+  sheet.getRange(s._row, SHEET_DEFS[SHEET_SECTIONS].indexOf('hidden') + 1).setValue(!!hidden);
   clearSig_(s.boardId);
   return getSections(s.boardId);
 }
@@ -891,7 +925,7 @@ function ensureDefaultSection_(boardId) {
   var secs = getSections(boardId);
   if (secs.length) return secs[0].sectionId;
   var id = genId_('s');
-  getSheet_(SHEET_SECTIONS).appendRow([id, boardId, 'みんなの投稿', 1, new Date(), '']);
+  getSheet_(SHEET_SECTIONS).appendRow([id, boardId, 'みんなの投稿', 1, new Date(), '', false]);
   return id;
 }
 
@@ -907,7 +941,7 @@ function ensureDefaultSection_(boardId) {
  *     → 変更を検知した30人が一斉に getBoardData を呼んでも、シートの読み直しはほぼ起きない。
  *   ・「自分のリアクション」だけを返す直前に付け足す（personalizeBundle_）。
  */
-function getBoardData(boardId, currentName) {
+function getBoardData(boardId, currentName, teacherPassword) {
   var sig = getBoardSignature(boardId);
   if (sig === SIG_GONE) throw new Error('ボードが見つかりません。');
   var bundle = cacheGetJson_(bundleKey_(boardId, sig));
@@ -916,7 +950,8 @@ function getBoardData(boardId, currentName) {
     if (!bundle) throw new Error('ボードが見つかりません。');
     cachePutJson_(bundleKey_(boardId, bundle.sig), bundle, BUNDLE_TTL_SEC);
   }
-  return personalizeBundle_(bundle, currentName);
+  // 非表示のセクション・投稿は先生だけに返す（児童のブラウザへは中身を送らない）
+  return personalizeBundle_(bundle, currentName, isTeacher_(teacherPassword));
 }
 
 var SIG_TTL_SEC = 8;       // シグネチャのキャッシュ秒数（書き込み時は clearSig_ で即無効化）
@@ -925,9 +960,21 @@ var SIG_GONE = 'gone';
 function sigKey_(boardId) { return 'sig_' + boardId; }
 function bundleKey_(boardId, sig) { return 'bd_' + boardId + '_' + hashString_(sig); }
 
-/** 共通データから、ログイン中の人向けの応答を作る（reactors は名前一覧なので外へは出さない）。 */
-function personalizeBundle_(bundle, currentName) {
-  var cards = bundle.cards.map(function (c) {
+/**
+ * 共通データから、ログイン中の人向けの応答を作る（reactors は名前一覧なので外へは出さない）。
+ * asTeacher が false のときは、非表示のセクション・投稿をここで取り除く。
+ */
+function personalizeBundle_(bundle, currentName, asTeacher) {
+  var sections = bundle.sections, srcCards = bundle.cards;
+  if (!asTeacher) {
+    var hiddenSec = {};
+    sections = sections.filter(function (s) {
+      if (s.hidden) { hiddenSec[s.sectionId] = true; return false; }
+      return true;
+    });
+    srcCards = srcCards.filter(function (c) { return !c.hidden && !hiddenSec[c.sectionId || '']; });
+  }
+  var cards = srcCards.map(function (c) {
     var mine = {};
     if (currentName && c.reactors) {
       Object.keys(c.reactors).forEach(function (t) {
@@ -939,7 +986,7 @@ function personalizeBundle_(bundle, currentName) {
     out.myReactions = mine;
     return out;
   });
-  return { board: bundle.board, sections: bundle.sections, roster: bundle.roster, cards: cards, sig: bundle.sig };
+  return { board: bundle.board, sections: sections, roster: bundle.roster, cards: cards, sig: bundle.sig };
 }
 
 /**
@@ -976,7 +1023,8 @@ function loadBoardBundle_(boardId) {
     (byRef[c.reflectionId] = byRef[c.reflectionId] || []).push({
       commentId: c.commentId, author: asText_(c.author), text: asText_(c.text), createdAt: toMs_(c.createdAt)
     });
-    comKeys.push(String(c.commentId));
+    // 本文も含める（先生がコメントを編集したとき、他の端末にも反映されるように）
+    comKeys.push(String(c.commentId) + ':' + hashString_(asText_(c.text)));
   });
   Object.keys(byRef).forEach(function (k) {
     byRef[k].sort(function (a, b) { return (a.createdAt || 0) - (b.createdAt || 0); });
@@ -988,7 +1036,8 @@ function loadBoardBundle_(boardId) {
     var u = updated || created || 0;
     if (u > maxMs) maxMs = u;
     var sortOrder = Number(r.sortOrder) || 0, sectionId = r.sectionId || '';
-    layoutKeys.push(r.reflectionId + ':' + sectionId + ':' + sortOrder);
+    var hidden = truthy_(r.hidden);
+    layoutKeys.push(r.reflectionId + ':' + sectionId + ':' + sortOrder + ':' + (hidden ? 'h' : ''));
     return {
       reflectionId: r.reflectionId,
       sectionId: sectionId,
@@ -1001,8 +1050,9 @@ function loadBoardBundle_(boardId) {
       sortOrder: sortOrder,
       createdAt: created,
       updatedAt: updated,
-      pinned: r.pinned === true || r.pinned === 'true' || r.pinned === 1,
-      link: parseLink_(r.link),
+      pinned: truthy_(r.pinned),
+      hidden: hidden,
+      links: parseLinks_(r.link),
       likeCount: likeCount[r.reflectionId] || 0,
       reactions: reactByRef[r.reflectionId] || {},
       reactors: reactorsByRef[r.reflectionId] || {},
@@ -1012,7 +1062,9 @@ function loadBoardBundle_(boardId) {
   cards.sort(cardCompare_);
 
   var sections = getSections(boardId);
-  var secKeys = sections.map(function (s) { return s.sectionId + ':' + s.name + ':' + (s.color || '') + ':' + s.sortOrder; });
+  var secKeys = sections.map(function (s) {
+    return s.sectionId + ':' + s.name + ':' + (s.color || '') + ':' + s.sortOrder + ':' + (s.hidden ? 'h' : '');
+  });
 
   var sig = [
     refs.length, maxMs,
@@ -1102,12 +1154,17 @@ function postReflection(boardId, sectionId, studentName, password, title, text, 
   }
   title = String(title || '').trim();
   text = String(text || '').trim();
-  var linkObj = sanitizeLink_(link);
-  if (!title && !text && !media && !linkObj) throw new Error('タイトル・本文・写真・動画・リンクのいずれかを入力してください。');
+  var links = sanitizeLinks_(link);
+  if (!title && !text && !media && !links.length) throw new Error('タイトル・本文・写真・動画・リンクのいずれかを入力してください。');
   var board = getBoard(boardId);
   if (!board) throw new Error('ボードが見つかりません。');
 
   if (!sectionId) sectionId = ensureDefaultSection_(boardId);
+  // 非表示のセクションへは先生以外は投稿できない（児童の画面には出ていないはずだが念のため）
+  if (!isTeacher_(teacherPassword)) {
+    var target = getSections(boardId).filter(function (s) { return s.sectionId === sectionId; })[0];
+    if (target && target.hidden) throw new Error('このセクションは今は投稿できません。');
+  }
 
   var url = '', fileId = '', mediaType = '';
   if (media && media.data) {
@@ -1126,7 +1183,7 @@ function postReflection(boardId, sectionId, studentName, password, title, text, 
   // 列順は SHEET_DEFS[SHEET_REFLECTIONS] と一致させること
   getSheet_(SHEET_REFLECTIONS).appendRow([
     id, boardId, author, "'" + text, url, fileId, color || '#fff7c0', maxOrder + 1, now, sectionId, mediaType, now, false, "'" + title,
-    linkObj ? JSON.stringify(linkObj) : ''
+    linksJson_(links), false
   ]);
   clearSig_(boardId);
   // 速度重視：作成したカード1枚だけを返す（クライアントは部分描画する）
@@ -1134,11 +1191,36 @@ function postReflection(boardId, sectionId, studentName, password, title, text, 
     card: {
       reflectionId: id, sectionId: sectionId, studentName: author, title: title, text: text,
       photoUrl: url, mediaType: mediaType, color: color || '#fff7c0', sortOrder: maxOrder + 1,
-      createdAt: now.getTime(), updatedAt: now.getTime(), pinned: false,
-      link: linkObj, reactions: {}, myReactions: {},
+      createdAt: now.getTime(), updatedAt: now.getTime(), pinned: false, hidden: false,
+      links: links, reactions: {}, myReactions: {},
       likeCount: 0, comments: []
     }
   };
+}
+
+/** 1つの投稿に添付できるリンクの最大数。 */
+var MAX_LINKS = 5;
+
+/**
+ * クライアントから来たリンク（1件 または 配列）を安全な配列に整形する。
+ * 無効なURL・重複は取り除き、MAX_LINKS 件までに切り詰める。
+ */
+function sanitizeLinks_(links) {
+  if (!links) return [];
+  var arr = Array.isArray(links) ? links : [links];
+  var out = [], seen = {};
+  for (var i = 0; i < arr.length && out.length < MAX_LINKS; i++) {
+    var lk = sanitizeLink_(arr[i]);
+    if (!lk || seen[lk.url]) continue;
+    seen[lk.url] = true;
+    out.push(lk);
+  }
+  return out;
+}
+
+/** リンク配列をセルに書く文字列にする（空配列なら空文字）。 */
+function linksJson_(links) {
+  return (links && links.length) ? JSON.stringify(links) : '';
 }
 
 /** クライアントから来たリンク情報を安全なオブジェクトに整形（無効なら null）。 */
@@ -1162,6 +1244,7 @@ function sanitizeLink_(link) {
  * media を渡せば差し替え、removeMedia=true なら添付を削除、どちらも無ければ本文/色のみ更新。
  */
 function editReflection(reflectionId, studentName, password, teacherPassword, title, text, color, media, removeMedia, link, removeLink, classId) {
+  // link は複数URL対応後はリンクの配列。removeLink=true で「添付リンクなし」に更新する。
   var sheet = getSheet_(SHEET_REFLECTIONS);
   var r = readSheet_(SHEET_REFLECTIONS).filter(function (x) { return x.reflectionId === reflectionId; })[0];
   if (!r) throw new Error('投稿が見つかりません。');
@@ -1171,11 +1254,11 @@ function editReflection(reflectionId, studentName, password, teacherPassword, ti
   var def = SHEET_DEFS[SHEET_REFLECTIONS];
   title = String(title || '').trim();
   text = String(text || '').trim();
-  var linkObj = sanitizeLink_(link);
+  var links = sanitizeLinks_(link);
 
   // 変更後に添付が残るか（先に検証し、空投稿になるなら何も書き換えない）
   var willHaveMedia = (media && media.data) ? true : (removeMedia ? false : !!r.photoFileId);
-  var willHaveLink = linkObj ? true : (removeLink ? false : !!r.link);
+  var willHaveLink = links.length ? true : (removeLink ? false : !!r.link);
   if (!title && !text && !willHaveMedia && !willHaveLink) throw new Error('タイトル・本文・写真・動画・リンクのいずれかは必要です。');
 
   sheet.getRange(r._row, def.indexOf('title') + 1).setValue("'" + title);
@@ -1183,7 +1266,7 @@ function editReflection(reflectionId, studentName, password, teacherPassword, ti
   if (color) sheet.getRange(r._row, def.indexOf('color') + 1).setValue(color);
 
   var linkCol = def.indexOf('link') + 1;
-  if (linkObj) sheet.getRange(r._row, linkCol).setValue(JSON.stringify(linkObj));
+  if (links.length) sheet.getRange(r._row, linkCol).setValue(linksJson_(links));
   else if (removeLink) sheet.getRange(r._row, linkCol).setValue('');
 
   if (media && media.data) {
@@ -1206,23 +1289,46 @@ function editReflection(reflectionId, studentName, password, teacherPassword, ti
   // 速度重視：変更後の値だけ返す（クライアントは該当カードを差し替える）
   var newUrl = (media && media.data) ? readCell_(sheet, r._row, def, 'photoUrl') : (removeMedia ? '' : r.photoUrl);
   var newType = (media && media.data) ? readCell_(sheet, r._row, def, 'mediaType') : (removeMedia ? '' : (r.mediaType || (r.photoUrl ? 'image' : '')));
-  var newLink = linkObj ? linkObj : (removeLink ? null : parseLink_(r.link));
+  var newLinks = links.length ? links : (removeLink ? [] : parseLinks_(r.link));
   return {
     update: {
       reflectionId: reflectionId, title: title, text: text, color: color || r.color,
-      photoUrl: newUrl, mediaType: newType, link: newLink, updatedAt: now.getTime()
+      photoUrl: newUrl, mediaType: newType, links: newLinks, updatedAt: now.getTime()
     }
   };
 }
 
-/** セルの link(JSON文字列) を安全にオブジェクト化（無ければ null）。 */
-function parseLink_(v) {
-  if (!v) return null;
-  try { var o = JSON.parse(v); return (o && o.url) ? o : null; } catch (e) { return null; }
+/**
+ * セルの link を安全にリンク配列へ戻す（無ければ空配列）。
+ * 新しいデータは JSON配列、旧データは JSON オブジェクト1件。どちらも配列で返す。
+ */
+function parseLinks_(v) {
+  if (!v) return [];
+  if (typeof v === 'object') return sanitizeLinks_(v);
+  var str = String(v).trim();
+  if (!str) return [];
+  if (str.charAt(0) === '[' || str.charAt(0) === '{') {
+    try { return sanitizeLinks_(JSON.parse(str)); } catch (e) { return []; }
+  }
+  return sanitizeLinks_(str);   // ごく古いデータ（URL文字列だけ）にも備える
 }
 
 function readCell_(sheet, row, def, key) {
   return sheet.getRange(row, def.indexOf(key) + 1).getValue();
+}
+
+/**
+ * 投稿の表示／非表示を切り替え（先生のみ）。
+ * 非表示にした投稿は児童の画面に配信されません（データ・写真は残ります）。
+ */
+function setReflectionHidden(reflectionId, hidden, teacherPassword) {
+  requireTeacher_(teacherPassword, '投稿の非表示');
+  var sheet = getSheet_(SHEET_REFLECTIONS);
+  var r = readSheet_(SHEET_REFLECTIONS).filter(function (x) { return x.reflectionId === reflectionId; })[0];
+  if (!r) throw new Error('投稿が見つかりません。');
+  sheet.getRange(r._row, SHEET_DEFS[SHEET_REFLECTIONS].indexOf('hidden') + 1).setValue(!!hidden);
+  clearSig_(r.boardId);
+  return { hidden: !!hidden };
 }
 
 /** ピン留めの切り替え。本人 または 先生。 */
@@ -1349,6 +1455,45 @@ function addComment(reflectionId, author, password, text, classId, boardId) {
   return list;
 }
 
+/** 投稿に紐づくコメントを、画面に返す形で読み直す。 */
+function commentsOf_(reflectionId) {
+  var list = readSheet_(SHEET_COMMENTS)
+    .filter(function (c) { return c.reflectionId === reflectionId; })
+    .map(function (c) { return { commentId: c.commentId, author: asText_(c.author), text: asText_(c.text), createdAt: toMs_(c.createdAt) }; });
+  list.sort(function (a, b) { return (a.createdAt || 0) - (b.createdAt || 0); });
+  return list;
+}
+
+/** 書いた本人 または 先生だけがそのコメントを触れる。 */
+function canEditComment_(comment, editorName, password, teacherPassword, classId) {
+  if (isTeacher_(teacherPassword)) return true;
+  return asText_(comment.author) === editorName && verifyStudent_(editorName, password, classId);
+}
+
+/** コメントの編集。書いた本人 または 先生。 */
+function editComment(commentId, editorName, password, teacherPassword, text, classId, boardId) {
+  var c = readSheet_(SHEET_COMMENTS).filter(function (x) { return x.commentId === commentId; })[0];
+  if (!c) throw new Error('コメントが見つかりません。');
+  if (!canEditComment_(c, editorName, password, teacherPassword, classId)) throw new Error('コメントを編集する権限がありません。');
+  text = String(text || '').trim();
+  if (!text) throw new Error('コメントを入力してください。');
+  // 先頭に ' を付けて「テキスト」として保存（5/22 等が日付に変換されるのを防ぐ）
+  getSheet_(SHEET_COMMENTS).getRange(c._row, SHEET_DEFS[SHEET_COMMENTS].indexOf('text') + 1).setValue("'" + text);
+  clearSig_(boardId);
+  return commentsOf_(c.reflectionId);
+}
+
+/** コメントの削除。書いた本人 または 先生。 */
+function deleteComment(commentId, editorName, password, teacherPassword, classId, boardId) {
+  var c = readSheet_(SHEET_COMMENTS).filter(function (x) { return x.commentId === commentId; })[0];
+  if (!c) throw new Error('コメントが見つかりません。');
+  if (!canEditComment_(c, editorName, password, teacherPassword, classId)) throw new Error('コメントを削除する権限がありません。');
+  var reflectionId = c.reflectionId;
+  deleteRowsWhere_(SHEET_COMMENTS, 'commentId', commentId);
+  clearSig_(boardId);
+  return commentsOf_(reflectionId);
+}
+
 // ============================ リンク（プレビューはクライアント側で生成） ============================
 // ※ 外部リクエスト権限(UrlFetchApp)を使わない方針。プレビュー情報はクライアントが作って渡す。
 
@@ -1415,7 +1560,8 @@ function getOrCreateSubfolder_(parent, name) {
 /** ボード全体の出力データ（印刷用）。 */
 function exportBoard(boardId, teacherPassword) {
   requireTeacher_(teacherPassword, '出力');
-  return getBoardData(boardId, null);
+  // 先生の出力なので、非表示にした投稿・セクションも含めて返す
+  return getBoardData(boardId, null, teacherPassword);
 }
 
 /** 児童別の出力データ：その児童の（クラス内）全ボードにわたる振り返りを時系列で。 */
@@ -1437,7 +1583,7 @@ function exportStudent(studentName, classId, teacherPassword) {
         subject: bd.subject || '', unit: bd.unit || '', date: bd.date || '',
         title: asText_(r.title), text: asText_(r.text), photoUrl: r.photoUrl,
         mediaType: r.mediaType || (r.photoUrl ? 'image' : ''),
-        link: parseLink_(r.link),
+        links: parseLinks_(r.link), hidden: truthy_(r.hidden),
         color: r.color, createdAt: toMs_(r.createdAt)
       };
     });

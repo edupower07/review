@@ -143,6 +143,12 @@
     .card.nodrag{cursor:default}
     .card.pinned{box-shadow:0 0 0 2px var(--accent2),0 3px 10px rgba(0,0,0,.14)}
     .pin-strip{font-size:11px;color:var(--accent2);font-weight:700;margin:-2px 0 6px}
+    /* 非表示（先生だけに見えている状態） */
+    .hidden-strip{font-size:11px;color:#8a6d1f;font-weight:700;margin:-2px 0 6px}
+    .card.is-hidden{opacity:.72;outline:2px dashed #c9a227;outline-offset:-3px}
+    .section-col.is-hidden{opacity:.8}
+    .section-col.is-hidden .col-header{background:repeating-linear-gradient(45deg,rgba(201,162,39,.16),rgba(201,162,39,.16) 8px,rgba(201,162,39,.06) 8px,rgba(201,162,39,.06) 16px)}
+    .sec-hidden-tag{font-size:11px;color:#8a6d1f;font-weight:700;margin-left:4px}
     /* 投稿者（小さめ） */
     .card .meta-row{display:flex;align-items:center;gap:6px;color:var(--muted);font-size:12px;margin-bottom:4px;padding-right:44px}
     .card .meta-row .who{font-weight:600;color:#555}
@@ -168,6 +174,10 @@
     .link-prev .lp-desc{color:#555;font-size:12px;margin-top:3px;
       display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
     .link-prev .lp-site{color:var(--muted);font-size:12px;margin-top:4px}
+    /* 投稿モーダルの「追加したリンク」一覧 */
+    .link-item{margin-bottom:10px}
+    .link-item .link-item-tools{display:flex;gap:8px;margin-top:6px}
+    .link-count{color:var(--muted);font-size:12px;margin:-6px 0 8px}
     .card .time{color:rgba(0,0,0,.40);font-size:11px;margin-top:6px}
     /* 拡大プレビュー（ライトボックス） */
     .lightbox{position:fixed;inset:0;background:rgba(0,0,0,.86);z-index:500;display:flex;
@@ -197,6 +207,9 @@
     .comments{margin-top:8px;border-top:1px solid rgba(0,0,0,.08);padding-top:6px}
     .comment{font-size:13px;margin-bottom:4px;line-height:1.4}
     .comment b{font-weight:700}
+    .c-tools{white-space:nowrap}
+    .c-tools button{border:none;background:transparent;cursor:pointer;font-size:12px;padding:0 2px;opacity:.55}
+    .c-tools button:hover{opacity:1}
     .comment-form{display:flex;gap:6px;margin-top:6px}
     .comment-form input{flex:1;padding:6px 8px;border:1px solid rgba(0,0,0,.15);border-radius:8px;font-size:13px;font-family:inherit;background:rgba(255,255,255,.7)}
     .comment-form button{border:none;background:var(--accent2);color:#fff;border-radius:8px;padding:6px 10px;font-size:13px}
@@ -275,7 +288,7 @@
 // ============================================================
 var App = (function(){
   // サーバー(Code.gs)の APP_BUILD と必ず一致させること。ズレていれば「デプロイ未更新」を警告する。
-  var APP_BUILD = '26';
+  var APP_BUILD = '27';
   var COLORS = ['#fff7c0','#ffd1dc','#c8f0d0','#cfe3ff','#e8d6ff','#ffe2bf','#ffffff'];
   // セクションの色分け用パレット（先生が選ぶ）
   var SECTION_COLORS = ['#e8554e','#e08a3c','#d9a400','#2faf6b','#2796a8','#3f7fd6','#8c5bd0','#d24b8c','#7a8b3c','#6a7a8c'];
@@ -321,8 +334,9 @@ var App = (function(){
     'getStudents','addStudent','importStudents','removeStudent','resetStudentPassword','setStudentNumber',
     'getBoards','createBoard','deleteBoard','copyBoard','setBoardArchived',
     'getBoardData','getBoardSignature','updateLayout',
-    'createSection','renameSection','deleteSection','setSectionColor','reorderSections',
-    'postReflection','editReflection','deleteReflection','togglePin','toggleReaction','addComment',
+    'createSection','renameSection','deleteSection','setSectionColor','reorderSections','setSectionHidden',
+    'postReflection','editReflection','deleteReflection','togglePin','toggleReaction','setReflectionHidden',
+    'addComment','editComment','deleteComment',
     'exportBoard','exportStudent'];
   // デプロイに含まれていない関数の一覧（空なら最新）
   function missingServerFunctions(){
@@ -604,7 +618,7 @@ var App = (function(){
   function openBoard(boardId){
     stopPolling();
     spinner();
-    run('getBoardData',boardId,user?user.name:null).then(function(data){
+    run('getBoardData',boardId,user?user.name:null,teacherPass).then(function(data){
       applyBoardData(data);
       setSeen(boardId, current.cards.length);  // 開いた時点の投稿数を既読として記録
       setCrumb('ボード › '+data.board.title);
@@ -693,7 +707,7 @@ var App = (function(){
           if(ok && onlyMedia && !r.photoUrl) ok=false;
           if(ok && q){
             var hay=((r.studentName||'')+' '+(r.title||'')+' '+(r.text||'')+' '
-              +(r.link?(r.link.title+' '+r.link.url+' '+r.link.site):'')+' '
+              +linkText(r.links)+' '
               +(r.comments?r.comments.map(function(c){return c.author+' '+c.text;}).join(' '):'')).toLowerCase();
             if(hay.indexOf(q)<0) ok=false;
           }
@@ -709,7 +723,7 @@ var App = (function(){
 
   function buildColumn(sec, cards, isTeacher){
     var colEl=document.createElement('div');
-    colEl.className='section-col'; colEl.dataset.sectionId=sec.sectionId;
+    colEl.className='section-col'+(sec.hidden?' is-hidden':''); colEl.dataset.sectionId=sec.sectionId;
     if(sec._none) colEl.dataset.orphan='1';
 
     // セクション色（先生が設定）。色があれば上部にアクセントバー＋ヘッダーを淡く着色。
@@ -723,6 +737,7 @@ var App = (function(){
     if(isTeacher && !sec._none){
       tools='<span class="sec-tools"><button title="色を変える" data-act="color">🎨</button>'
         +'<button title="名前を変更" data-act="rename">✏</button>'
+        +'<button title="'+(sec.hidden?'児童にも表示する':'児童から非表示にする')+'" data-act="hide">'+(sec.hidden?'👁':'🙈')+'</button>'
         +'<button title="削除" data-act="del">🗑</button></span>';
     }
     var addBtn = (!sec._none && (user||teacherPass)) ? '<button class="add-bar" data-act="add">＋ 投稿</button>' : '';
@@ -730,6 +745,7 @@ var App = (function(){
     var grip = (isTeacher && !sec._none)
       ? '<button class="sec-grip" data-act="grip" title="ドラッグでセクションを入れ替え">⠿</button>' : '';
     head.innerHTML='<div class="col-title">'+grip+'<span class="sec-name">'+esc(sec.name)
+      +(sec.hidden?'<span class="sec-hidden-tag">🙈 非表示</span>':'')
       +'<span class="count">'+cards.length+'</span></span>'+tools+'</div>'
       +addBtn;
     colEl.appendChild(head);
@@ -743,6 +759,7 @@ var App = (function(){
     if(isTeacher && !sec._none){
       head.querySelector('[data-act="color"]').addEventListener('click',function(){ pickSectionColor(sec); });
       head.querySelector('[data-act="rename"]').addEventListener('click',function(){ renameSection(sec); });
+      head.querySelector('[data-act="hide"]').addEventListener('click',function(){ toggleHideSection(sec); });
       head.querySelector('[data-act="del"]').addEventListener('click',function(){ deleteSection(sec); });
     }
 
@@ -760,7 +777,8 @@ var App = (function(){
   function cardEl(r){
     var d=document.createElement('div');
     var canDrag=(sortMode==='manual');   // 並べ替え中に動かすと「標準」の順番が勝手に書き換わるので止める
-    d.className='card'+(r.pinned?' pinned':'')+(canDrag?'':' nodrag'); d.style.background=r.color||'#fff7c0';
+    d.className='card'+(r.pinned?' pinned':'')+(canDrag?'':' nodrag')+(r.hidden?' is-hidden':'');
+    d.style.background=r.color||'#fff7c0';
     d.setAttribute('draggable',canDrag?'true':'false'); d.dataset.id=r.reflectionId;
     var canEdit = teacherPass || (user && user.name===r.studentName);
     var media='';
@@ -781,17 +799,19 @@ var App = (function(){
         +'<div class="menu hidden">'
         +'<button class="m-pin">'+(r.pinned?'📌 ピン留めを解除':'📌 ピン留め')+'</button>'
         +'<button class="m-edit">✏️ 編集</button>'
+        +(teacherPass?'<button class="m-hide">'+(r.hidden?'👁 児童にも表示':'🙈 児童から非表示')+'</button>':'')
         +'<button class="m-del danger">🗑️ 削除</button>'
         +'</div></div>'
       : '';
     var html=tools
+      +(r.hidden?'<div class="hidden-strip">🙈 非表示（先生だけに見えています）</div>':'')
       +(r.pinned?'<div class="pin-strip">📌 ピン留め</div>':'')
       +'<div class="meta-row"><span class="who">'+esc(r.studentName)+'</span><span>'+fmt(r.createdAt)
         +(r.updatedAt&&r.updatedAt>r.createdAt?'（編集済み）':'')+'</span></div>'
       +(r.title?'<div class="card-title">'+esc(r.title)+'</div>':'')
       +(r.text?'<div class="body">'+esc(r.text)+'</div>':'')
       +media
-      +linkCardHtml(r.link)
+      +linksHtml(r.links)
       +'<div class="card-actions">'
       +REACTIONS.map(function(t){
           var cnt=(r.reactions&&r.reactions[t])||0;
@@ -819,6 +839,8 @@ var App = (function(){
       });
       d.querySelector('.m-pin').addEventListener('click',function(e){e.stopPropagation();closeAllMenus();togglePinCard(r);});
       d.querySelector('.m-edit').addEventListener('click',function(e){e.stopPropagation();closeAllMenus();openEdit(r);});
+      var hideBtn=d.querySelector('.m-hide');
+      if(hideBtn) hideBtn.addEventListener('click',function(e){e.stopPropagation();closeAllMenus();toggleHideCard(r);});
       d.querySelector('.m-del').addEventListener('click',function(e){e.stopPropagation();closeAllMenus();delCard(r);});
     }
     renderComments(r,d); // コメントは常時表示
@@ -832,14 +854,14 @@ var App = (function(){
   // -------- 差分更新（チラつかずスクロールも保つ） --------
   function rsig(o){ if(!o)return ''; return Object.keys(o).sort().map(function(k){return k+o[k];}).join(','); }
   function cardSig(c){
-    return [c.title,c.text,c.color,c.pinned?1:0,c.photoUrl,c.mediaType,c.updatedAt,c.sortOrder,
-      c.link?(c.link.url+'|'+c.link.title+'|'+(c.link.image||'')):'',
+    return [c.title,c.text,c.color,c.pinned?1:0,c.hidden?1:0,c.photoUrl,c.mediaType,c.updatedAt,c.sortOrder,
+      (c.links||[]).map(function(l){return l.url+'|'+l.title+'|'+(l.image||'');}).join('~~'),
       c.likeCount,rsig(c.reactions),rsig(c.myReactions),
-      (c.comments?c.comments.map(function(x){return x.commentId;}).join(','):'')].join('~');
+      (c.comments?c.comments.map(function(x){return x.commentId+':'+x.text;}).join(','):'')].join('~');
   }
   function structSig_(sections,cards){
     var orphan=cards.some(function(c){return !(c.sectionId);});
-    return (sections||[]).map(function(s){return s.sectionId+':'+s.name+':'+(s.color||'')+':'+s.sortOrder;}).join('|')+'|o='+(orphan?1:0);
+    return (sections||[]).map(function(s){return s.sectionId+':'+s.name+':'+(s.color||'')+':'+s.sortOrder+':'+(s.hidden?'h':'');}).join('|')+'|o='+(orphan?1:0);
   }
   // ポーリングでの更新を、ボードを作り直さずに反映する（構造が変わったときだけ全再描画）
   function reconcileBoard(data){
@@ -946,14 +968,50 @@ var App = (function(){
       .then(function(res){ r.pinned=res.pinned; })
       .catch(function(e){ r.pinned=!np; renderBoard(); err(e); });
   }
+  // 投稿の非表示（先生のみ）。児童のブラウザにはサーバー側で配信されなくなる。
+  function toggleHideCard(r){
+    if(!teacherPass){ toast('非表示にできるのは先生だけです'); return; }
+    var nh=!r.hidden;
+    run('setReflectionHidden',r.reflectionId,nh,teacherPass).then(function(res){
+      r.hidden=!!res.hidden; replaceCardDom(r);
+      toast(nh?'この投稿を児童から非表示にしました':'この投稿を再表示しました');
+    }).catch(err);
+  }
+  // セクションの非表示（先生のみ）。中の投稿もまとめて児童から見えなくなる。
+  function toggleHideSection(sec){
+    if(!teacherPass){ toast('非表示にできるのは先生だけです'); return; }
+    var nh=!sec.hidden;
+    if(nh && !confirm('セクション「'+sec.name+'」を児童から非表示にしますか？\n中の投稿も見えなくなります（データは残ります）。'))return;
+    run('setSectionHidden',sec.sectionId,nh,teacherPass).then(function(secs){
+      current.sections=secs||current.sections; renderBoard();
+      toast(nh?'セクションを児童から非表示にしました':'セクションを再表示しました');
+    }).catch(err);
+  }
+
   // コメントは投稿の下に常時表示
+  function canEditComment(c){ return !!teacherPass || !!(user && user.name===c.author); }
   function renderComments(r,d){
     var box=d.querySelector('.comments');
-    var html=r.comments.map(function(c){return '<div class="comment"><b>'+esc(c.author)+'</b>：'+esc(c.text)+'</div>';}).join('');
+    var html=r.comments.map(function(c){
+      return '<div class="comment" data-cid="'+esc(c.commentId)+'"><b>'+esc(c.author)+'</b>：'+esc(c.text)
+        +(canEditComment(c)
+          ? '<span class="c-tools"><button class="c-edit" title="コメントを編集">✏</button>'
+            +'<button class="c-del" title="コメントを削除">🗑</button></span>'
+          : '')
+        +'</div>';
+    }).join('');
     if(user){
       html+='<div class="comment-form"><input placeholder="コメントを追加…"><button>送信</button></div>';
     }
     box.innerHTML=html;
+    // 編集・削除ボタン（先生 または 書いた本人）
+    r.comments.forEach(function(c){
+      var row=box.querySelector('.comment[data-cid="'+c.commentId+'"]'); if(!row)return;
+      var eb=row.querySelector('.c-edit'), db=row.querySelector('.c-del');
+      if(eb) eb.addEventListener('click',function(e){ e.stopPropagation(); editCommentText(r,d,c); });
+      if(db) db.addEventListener('click',function(e){ e.stopPropagation(); delComment(r,d,c); });
+    });
+    d._sig=cardSig(r);   // コメントを差し替えたので指紋も更新（ポーリングでの二重描画を防ぐ）
     if(user){
       var input=box.querySelector('input'), btn=box.querySelector('button');
       var send=function(){
@@ -965,6 +1023,24 @@ var App = (function(){
       btn.addEventListener('click',send);
       input.addEventListener('keydown',function(e){if(e.key==='Enter')send();});
     }
+  }
+  // コメントの編集（先生 または 書いた本人）
+  function editCommentText(r,d,c){
+    var t=prompt('コメントを編集',c.text); if(t==null)return;
+    t=t.trim(); if(!t){ toast('コメントを入力してください'); return; }
+    if(t===c.text) return;
+    run('editComment',c.commentId,user?user.name:null,user?user.password:null,teacherPass,t,
+        user?user.classId:null,current.board?current.board.boardId:null)
+      .then(function(list){ r.comments=list; renderComments(r,d); toast('コメントを保存しました'); })
+      .catch(err);
+  }
+  // コメントの削除（先生 または 書いた本人）
+  function delComment(r,d,c){
+    if(!confirm('このコメントを削除しますか？\n「'+c.text+'」'))return;
+    run('deleteComment',c.commentId,user?user.name:null,user?user.password:null,teacherPass,
+        user?user.classId:null,current.board?current.board.boardId:null)
+      .then(function(list){ r.comments=list; renderComments(r,d); toast('コメントを削除しました'); })
+      .catch(err);
   }
   function delCard(r){
     if(!confirm('この投稿を削除しますか？'))return;
@@ -1132,7 +1208,7 @@ var App = (function(){
       if(document.hidden || busy()) return;
       run('getBoardSignature',boardId).then(function(sig){
         if(sig!==lastSig){
-          run('getBoardData',boardId,user?user.name:null).then(function(data){
+          run('getBoardData',boardId,user?user.name:null,teacherPass).then(function(data){
             if(!current.board||current.board.boardId!==boardId||!$('board')) return;
             if(busy()) return; // 取得中に操作が始まったら今回はスキップ
             reconcileBoard(data); setSeen(boardId, current.cards.length);
@@ -1157,20 +1233,27 @@ var App = (function(){
   var pendingMedia=null;      // {data,mimeType,filename,kind,previewUrl}
   var pickedColor=COLORS[0];
   var removeExisting=false;
-  var pendingLink=null;       // {url,title,image,desc,site}
-  var removeLink=false;
+  var MAX_LINKS=5;            // 1投稿に付けられるリンクの数（Code.gs の MAX_LINKS と合わせる）
+  var pendingLinks=[];        // [{url,title,image,desc,site,favicon}]（最大 MAX_LINKS 件）
+
+  // 編集をキャンセルしても元のカードが変わらないよう、リンクは複製して持つ
+  function cloneLinks(list){
+    return (list||[]).map(function(l){
+      return {url:l.url,title:l.title,site:l.site,image:l.image||'',favicon:l.favicon||'',desc:l.desc||''};
+    });
+  }
 
   function openPost(sectionId){
     if(!user && !teacherPass){toast('投稿はログインが必要です');return;}
     mode='post'; postSectionId=sectionId||''; editTarget=null;
     pendingMedia=null; removeExisting=false; pickedColor=COLORS[0];
-    pendingLink=null; removeLink=false;
+    pendingLinks=[];
     showMediaModal('投稿する','','');
   }
   function openEdit(card){
     mode='edit'; editTarget=card;
     pendingMedia=null; removeExisting=false; pickedColor=card.color||COLORS[0];
-    pendingLink=card.link||null; removeLink=false;
+    pendingLinks=cloneLinks(card.links);
     showMediaModal('保存する',card.title||'',card.text||'');
   }
 
@@ -1186,12 +1269,13 @@ var App = (function(){
       +'</div>'
       +'<div id="mPrev" style="margin-bottom:12px"></div>'
       +'<div id="mRemoveWrap" style="margin-bottom:12px"></div>'
-      +'<label class="field"><span>リンク（URL・任意）</span>'
-        +'<input id="mLink" type="url" placeholder="https://… を貼り付け" inputmode="url"></label>'
-      +'<label class="field"><span>リンクの表示名（自動取得・編集できます）</span>'
-        +'<input id="mLinkTitle" type="text" placeholder="ページのタイトル" oninput="App.onLinkTitle(this.value)"></label>'
-      +'<div style="margin:-6px 0 12px;display:flex;gap:8px;flex-wrap:wrap">'
-        +'<button type="button" class="ghost-btn" onclick="App.previewLink()">🔗 プレビューを取得</button></div>'
+      +'<label class="field"><span>リンク（URL・任意・'+MAX_LINKS+'件まで）</span>'
+        +'<input id="mLink" type="url" placeholder="https://… を貼り付け（Enterでも追加）" inputmode="url"></label>'
+      +'<label class="field"><span>リンクの表示名（未入力なら自動取得）</span>'
+        +'<input id="mLinkTitle" type="text" placeholder="ページのタイトル"></label>'
+      +'<div style="margin:-6px 0 8px;display:flex;gap:8px;flex-wrap:wrap">'
+        +'<button type="button" class="ghost-btn" onclick="App.addLink()">🔗 リンクを追加</button></div>'
+      +'<div id="mLinkNote"></div>'
       +'<div id="mLinkPrev" style="margin-bottom:12px"></div>'
       +'<div class="color-row" id="cRow"></div>'
       +'<div class="modal-actions"><button class="ghost-btn" onclick="App.closeModal()">キャンセル</button>'
@@ -1201,10 +1285,19 @@ var App = (function(){
     row.innerHTML=COLORS.map(function(c){return '<div class="swatch'+(c===pickedColor?' active':'')+'" style="background:'+c+';'+(c==='#ffffff'?'border:1px solid #ddd':'')+'" data-c="'+c+'"></div>';}).join('');
     [].forEach.call(row.children,function(sw){sw.addEventListener('click',function(){pickedColor=sw.dataset.c;[].forEach.call(row.children,function(x){x.classList.remove('active');});sw.classList.add('active');});});
     $('mFile').addEventListener('change',onFile);
-    if($('mLink')) $('mLink').value=pendingLink?pendingLink.url:'';
-    if($('mLinkTitle')) $('mLinkTitle').value=(pendingLink&&pendingLink.title&&pendingLink.title!==pendingLink.site)?pendingLink.title:'';
+    // URL欄で Enter を押しても追加できる（モーダルが閉じないように既定動作は止める）
+    ['mLink','mLinkTitle'].forEach(function(id){
+      var el=$(id); if(!el)return;
+      el.addEventListener('keydown',function(e){
+        if(e.key!=='Enter')return;
+        e.preventDefault();
+        // 表示名だけ入れて Enter を押したときは、URLが空なら何もしない
+        if(id==='mLinkTitle' && !($('mLink')&&$('mLink').value.trim()))return;
+        addLink();
+      });
+    });
     renderMediaPreview();
-    renderLinkPreview();
+    renderLinkList();
   }
 
   // -------- リンクプレビュー（ブラウザ側だけで生成・権限不要） --------
@@ -1226,40 +1319,54 @@ var App = (function(){
     return { url:url, title:host, site:host, image:img,
       favicon:'https://www.google.com/s2/favicons?sz=128&domain='+encodeURIComponent(host) };
   }
-  function previewLink(){
-    var inp=$('mLink'); if(!inp)return;
+  // URL欄の内容をリンク一覧に追加する（1投稿に MAX_LINKS 件まで）
+  // 追加できたら true、できなかったら false（送信前の取り込みで使う）
+  function addLink(){
+    var inp=$('mLink'); if(!inp)return false;
     var url=inp.value.trim();
-    if(!url){ pendingLink=null; removeLink=true; renderLinkPreview(); return; }
+    if(!url){ toast('URLを入力してください'); return false; }
+    if(pendingLinks.length>=MAX_LINKS){ toast('リンクは'+MAX_LINKS+'件までです'); return false; }
     var lk=buildLinkLocal(url);
-    if(!lk){ toast('URLの形式が正しくありません'); return; }
+    if(!lk){ toast('URLの形式が正しくありません'); return false; }
+    var dup=pendingLinks.some(function(x){ return x.url===lk.url; });
+    if(dup){ toast('同じURLがすでに追加されています'); return false; }
     var manual=$('mLinkTitle')?$('mLinkTitle').value.trim():'';
     if(manual) lk.title=manual;
-    pendingLink=lk; removeLink=false;
-    if($('mLink')) $('mLink').value=lk.url;
-    renderLinkPreview();
+    pendingLinks.push(lk);
+    inp.value=''; if($('mLinkTitle')) $('mLinkTitle').value='';
+    setLinkNote('');
+    renderLinkList();
     // 表示名が未入力なら、ブラウザからページのタイトルを取得（権限不要・失敗してもドメイン表示のまま）
-    if(!manual){
-      setLinkNote('タイトルを取得中…');
-      fetchTitleViaProxy(lk.url).then(function(title){
-        if(title && pendingLink && pendingLink.url===lk.url){
-          pendingLink.title=title;
-          if($('mLinkTitle')) $('mLinkTitle').value=title;
-          setLinkNote('');
-          renderLinkPreview();
-        }else{
-          setLinkNote('⚠ サイト名を自動取得できませんでした（ネットワーク制限の可能性）。上の「表示名」に手で入力できます。');
-        }
-      }).catch(function(){
-        setLinkNote('⚠ サイト名を自動取得できませんでした（ネットワーク制限の可能性）。上の「表示名」に手で入力できます。');
-      });
-    }
+    if(!manual) fetchLinkTitle(lk);
+    return true;
+  }
+  // 追加済みリンクのタイトルを後から取りに行く（取れたらその行だけ書き換える）
+  function fetchLinkTitle(lk){
+    setLinkNote('「'+lk.site+'」のタイトルを取得中…');
+    var done=function(msg){ if($('mLinkPrev')) setLinkNote(msg); };
+    var p;
+    // 取得はおまけの機能なので、fetch が使えない環境でも投稿を止めない
+    try{ p=fetchTitleViaProxy(lk.url); }catch(e){ done('⚠ サイト名を自動取得できませんでした。「✏ 表示名」で手入力できます。'); return; }
+    p.then(function(title){
+      if(title && pendingLinks.indexOf(lk)>=0){
+        lk.title=title; done(''); renderLinkList();
+      }else{
+        done('⚠ サイト名を自動取得できませんでした（ネットワーク制限の可能性）。「✏ 表示名」で手入力できます。');
+      }
+    }).catch(function(){
+      done('⚠ サイト名を自動取得できませんでした（ネットワーク制限の可能性）。「✏ 表示名」で手入力できます。');
+    });
   }
   function setLinkNote(msg){
-    var box=$('mLinkPrev'); if(!box)return;
-    var n=$('lkNote'); if(n)n.remove();
-    if(msg) box.insertAdjacentHTML('afterbegin','<div id="lkNote" style="color:var(--muted);font-size:13px;margin-bottom:6px">'+esc(msg)+'</div>');
+    var box=$('mLinkNote'); if(!box)return;
+    box.innerHTML=msg?'<div style="color:var(--muted);font-size:13px;margin-bottom:6px">'+esc(msg)+'</div>':'';
   }
-  function onLinkTitle(v){ if(pendingLink){ pendingLink.title=(v||'').trim()||pendingLink.site; renderLinkPreview(); } }
+  function removeLinkAt(i){ pendingLinks.splice(i,1); renderLinkList(); }
+  function renameLinkAt(i){
+    var lk=pendingLinks[i]; if(!lk)return;
+    var t=prompt('リンクの表示名',lk.title||lk.site); if(t==null)return;
+    lk.title=t.trim()||lk.site; renderLinkList();
+  }
   function decodeHtml(s){ var t=document.createElement('textarea'); t.innerHTML=String(s||''); return t.value.trim(); }
   function extractTitle(html){
     html=String(html||'');
@@ -1300,13 +1407,24 @@ var App = (function(){
     }
     return attempt(0);
   }
-  function clearLink(){ pendingLink=null; removeLink=true; if($('mLink'))$('mLink').value=''; renderLinkPreview(); }
-  function renderLinkPreview(){
+  // 追加済みリンクの一覧（プレビュー＋表示名の変更・削除）
+  function renderLinkList(){
     var box=$('mLinkPrev'); if(!box)return;
-    if(pendingLink&&pendingLink.url){
-      box.innerHTML=linkCardHtml(pendingLink)
-        +'<div style="margin-top:8px"><button type="button" class="ghost-btn danger" onclick="App.clearLink()">🗑 リンクを削除</button></div>';
-    }else{ box.innerHTML=''; }
+    if(!pendingLinks.length){ box.innerHTML=''; return; }
+    box.innerHTML='<div class="link-count">追加したリンク '+pendingLinks.length+' / '+MAX_LINKS+' 件</div>'
+      +pendingLinks.map(function(lk,i){
+        return '<div class="link-item">'+linkCardHtml(lk)
+          +'<div class="link-item-tools">'
+          +'<button type="button" class="ghost-btn" onclick="App.renameLinkAt('+i+')">✏ 表示名</button>'
+          +'<button type="button" class="ghost-btn danger" onclick="App.removeLinkAt('+i+')">🗑 削除</button>'
+          +'</div></div>';
+      }).join('');
+  }
+  /** カードに並べるリンク（複数）。 */
+  function linksHtml(list){ return (list||[]).map(linkCardHtml).join(''); }
+  /** 検索用に、リンクの表示名・URL・サイト名をつなげた文字列を返す。 */
+  function linkText(list){
+    return (list||[]).map(function(l){ return (l.title||'')+' '+(l.url||'')+' '+(l.site||''); }).join(' ');
   }
   function linkCardHtml(lk){
     if(!lk||!lk.url)return '';
@@ -1436,20 +1554,24 @@ var App = (function(){
     var title=$('mTitle')?$('mTitle').value.trim():'';
     var text=$('mText').value.trim();
     var hasMediaAfter = pendingMedia || (mode==='edit'&&editTarget&&editTarget.photoUrl&&!removeExisting);
-    if(!title && !text && !hasMediaAfter && !pendingLink){toast('タイトル・本文・写真・動画・リンクを入れてください');return;}
+    // 入力途中のURLが残っていたら取り込んでから送る（「追加」を押し忘れても消えないように）
+    var typed=$('mLink')?$('mLink').value.trim():'';
+    if(typed && !addLink()) return;
+    if(!title && !text && !hasMediaAfter && !pendingLinks.length){toast('タイトル・本文・写真・動画・リンクを入れてください');return;}
     var btn=$('mSubmit'); btn.disabled=true; btn.textContent='送信中…';
     var fail=function(e){err(e);btn.disabled=false;btn.textContent='送信';};
     if(mode==='edit'){
-      run('editReflection',editTarget.reflectionId,user?user.name:null,user?user.password:null,teacherPass,title,text,pickedColor,pendingMedia,removeExisting,pendingLink,removeLink,user?user.classId:null)
+      // リンクが1件も無ければ「リンクを全部外す」指示（removeLink）として送る
+      run('editReflection',editTarget.reflectionId,user?user.name:null,user?user.password:null,teacherPass,title,text,pickedColor,pendingMedia,removeExisting,pendingLinks,pendingLinks.length===0,user?user.classId:null)
         .then(function(res){
           var u=res.update, card=findCard(u.reflectionId);
-          if(card){ card.title=u.title; card.text=u.text; card.color=u.color; card.photoUrl=u.photoUrl; card.mediaType=u.mediaType; card.link=u.link; card.updatedAt=u.updatedAt; replaceCardDom(card); }
+          if(card){ card.title=u.title; card.text=u.text; card.color=u.color; card.photoUrl=u.photoUrl; card.mediaType=u.mediaType; card.links=u.links||[]; card.updatedAt=u.updatedAt; replaceCardDom(card); }
           else refreshBoard();
           closeModal(); toast('保存しました');
         }).catch(fail);
     }else{
       var sName=user?user.name:null, sPw=user?user.password:null, tPw=(!user&&teacherPass)?teacherPass:null;
-      run('postReflection',current.board.boardId,postSectionId,sName,sPw,title,text,pickedColor,pendingMedia,pendingLink,tPw,user?user.classId:null)
+      run('postReflection',current.board.boardId,postSectionId,sName,sPw,title,text,pickedColor,pendingMedia,pendingLinks,tPw,user?user.classId:null)
         .then(function(res){
           var card=res.card; current.cards.push(card); insertCardDom(card);
           closeModal(); toast('投稿しました！');
@@ -1463,7 +1585,7 @@ var App = (function(){
     pickClass:pickClass, backToClasses:backToClasses,
     boardList:boardList, openBoard:openBoard, refreshBoard:refreshBoard, leaveBoard:leaveBoard,
     openPost:openPost, openEdit:openEdit, submitMedia:submitMedia, clearMedia:clearMedia,
-    previewLink:previewLink, clearLink:clearLink, onLinkTitle:onLinkTitle,
+    addLink:addLink, removeLinkAt:removeLinkAt, renameLinkAt:renameLinkAt,
     addSection:addSection, setSort:setSort,
     onSearch:onSearch, toggleMine:toggleMine, toggleMedia:toggleMedia,
     insertTemplate:insertTemplate,
@@ -1778,7 +1900,7 @@ var Teacher=(function(){
       cols.forEach(function(sec){
         var cards=bySec[sec.sectionId||'']||[];
         if(!cards.length) return;
-        html+='<div class="print-group"><h2>'+U.esc(sec.name)+'（'+cards.length+'件）</h2>';
+        html+='<div class="print-group"><h2>'+U.esc(sec.name)+(sec.hidden?'（🙈 非表示）':'')+'（'+cards.length+'件）</h2>';
         cards.forEach(function(c){ html+=printCard(c.studentName,c); });
         html+='</div>';
       });
@@ -1792,9 +1914,10 @@ var Teacher=(function(){
         +'<div>件数 '+data.reflections.length+'件</div></div>';
       data.reflections.forEach(function(r){
         html+='<div class="print-card"><div class="pmeta">'+U.esc(r.subject)+' ／ '+U.esc(r.unit)+' ／ '+U.esc(r.date)+'</div>'
+          +printHiddenTag(r)
           +(r.title?'<div style="font-weight:700">'+U.esc(r.title)+'</div>':'')
           +(r.text?'<div>'+U.esc(r.text)+'</div>':'')
-          +printMedia(r)+printLink(r)+'</div>';
+          +printMedia(r)+printLinks(r)+'</div>';
       });
       doPrint(html);
     }).catch(U.err);
@@ -1805,15 +1928,23 @@ var Teacher=(function(){
     if(c.mediaType==='pdf')   return '<div class="pmeta">📄 PDFの添付あり（画面でご確認ください）</div>';
     return '<img src="'+U.esc(c.photoUrl)+'" referrerpolicy="no-referrer">';
   }
-  function printLink(c){
-    if(!c.link||!c.link.url) return '';
-    return '<div class="pmeta" style="margin-top:4px">🔗 '+U.esc(c.link.title||c.link.url)+'：'+U.esc(c.link.url)+'</div>';
+  function printLinks(c){
+    var list=c.links||[];
+    if(!list.length) return '';
+    return list.map(function(l){
+      return '<div class="pmeta" style="margin-top:4px">🔗 '+U.esc(l.title||l.url)+'：'+U.esc(l.url)+'</div>';
+    }).join('');
+  }
+  /** 先生が非表示にした投稿は、出力にも「非表示」と分かるように印を付ける。 */
+  function printHiddenTag(c){
+    return c.hidden?'<div class="pmeta">🙈 非表示（児童には見えていません）</div>':'';
   }
   function printCard(author,c){
     return '<div class="print-card"><div class="pmeta">'+U.esc(author)+'（❤'+c.likeCount+' / 💬'+c.comments.length+'）</div>'
+      +printHiddenTag(c)
       +(c.title?'<div style="font-weight:700">'+U.esc(c.title)+'</div>':'')
       +(c.text?'<div>'+U.esc(c.text)+'</div>':'')
-      +printMedia(c)+printLink(c)
+      +printMedia(c)+printLinks(c)
       +(c.comments.length?'<div class="pmeta" style="margin-top:4px">コメント: '+c.comments.map(function(x){return U.esc(x.author+'「'+x.text+'」');}).join(' / ')+'</div>':'')
       +'</div>';
   }

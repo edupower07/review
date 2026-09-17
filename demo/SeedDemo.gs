@@ -243,7 +243,7 @@ function demoBoard_(subject, unit, title, daysAgo, archived, classId) {
 function demoSection_(boardId, name, order, color) {
   var id = genId_('s');
   // 列順：sectionId, boardId, name, sortOrder, createdAt, color
-  getSheet_(SHEET_SECTIONS).appendRow([id, boardId, name, order || 1, new Date(), color || '']);
+  getSheet_(SHEET_SECTIONS).appendRow([id, boardId, name, order || 1, new Date(), color || '', false]);
   return id;
 }
 
@@ -252,11 +252,13 @@ function demoPost_(boardId, sectionId, author, title, text, color, opts) {
   var id = genId_('r');
   var at = opts.at || new Date(Date.now() - (opts.minsAgo || 0) * 60000);
   // 列順：reflectionId, boardId, studentName, text, photoUrl, photoFileId, color,
-  //       sortOrder, createdAt, sectionId, mediaType, updatedAt, pinned, title, link
+  //       sortOrder, createdAt, sectionId, mediaType, updatedAt, pinned, title, link, hidden
+  // link は複数URL対応の配列。opts.link（1件）でも opts.links（複数）でも渡せる。
+  var links = opts.links || (opts.link ? [opts.link] : []);
   getSheet_(SHEET_REFLECTIONS).appendRow([
     id, boardId, author, text || '', opts.photoUrl || '', opts.photoFileId || '',
     color || '#fff7c0', opts.order || 1, at, sectionId, opts.mediaType || '', at,
-    !!opts.pinned, title || '', opts.link ? JSON.stringify(opts.link) : ''
+    !!opts.pinned, title || '', links.length ? JSON.stringify(links) : '', !!opts.hidden
   ]);
   return id;
 }
